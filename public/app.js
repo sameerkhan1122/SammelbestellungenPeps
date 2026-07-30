@@ -43,14 +43,6 @@
 
   function defaultState() {
     const order = makeOrder("Sammelbestellung 1");
-    order.products = [
-      { id: uid(), name: "Semax 10mg", participants: ["Samy", "Alex Deutschland"], qty: 2, price: 39 },
-      { id: uid(), name: "Mots C 10mg", participants: ["Iyad", "Alex Wien"], qty: 2, price: 47 },
-      { id: uid(), name: "KPV", participants: ["Regine"], qty: 2, price: 51 },
-      { id: uid(), name: "5amino", participants: ["Regine"], qty: 2, price: 48 },
-      { id: uid(), name: "BAC Wasser", participants: ["Alex Wien"], qty: 2, price: 4 },
-    ];
-    order.shipping = "80";
     return { people: DEFAULT_PEOPLE.slice(), orders: [order], activeId: order.id };
   }
 
@@ -158,11 +150,15 @@
       serverVersion = data.version;
       if (data.state && Array.isArray(data.state.orders) && data.state.orders.length > 0) {
         applyServerState(data.state);
-      } else {
-        // Server ist leer (erster Start) -> unseren Default hochladen
-        Object.assign(state, defaultState());
-        await pushState();
       }
+      // Ist der Server wirklich leer (erster Start) oder kurzzeitig nicht
+      // erreichbar, wird NICHTS automatisch hochgeschrieben. Wir zeigen dann
+      // einfach eine leere Sammelbestellung; der erste echte Push passiert
+      // erst, wenn jemand aktiv etwas einträgt. So kann ein Verbindungsfehler
+      // oder eine neu angelegte Datenbank niemals versehentlich bestehende
+      // Daten überschreiben.
+    } else {
+      connectionOk = false;
     }
     render();
     startPolling();
@@ -210,7 +206,10 @@
     root.appendChild(renderHeader());
     root.appendChild(renderTabsBar());
     root.appendChild(renderOrderView(order));
-    persist();
+    // WICHTIG: render() speichert absichtlich NICHT automatisch. Sonst würde
+    // auch ein reines Polling-Update (frische Daten von einem anderen Gerät)
+    // sofort wieder zurückgeschrieben. persist() wird stattdessen gezielt an
+    // den Stellen aufgerufen, an denen der Nutzer selbst etwas geändert hat.
   }
 
   function renderHeader() {
@@ -246,6 +245,7 @@
       formOpen = false;
       editingProductId = null;
       render();
+      persist();
     });
     bar.appendChild(addBtn);
 
@@ -271,6 +271,7 @@
         formOpen = false;
         editingProductId = null;
         render();
+        persist();
       });
       wrap.appendChild(labelBtn);
 
@@ -298,6 +299,7 @@
           formOpen = false;
           editingProductId = null;
           render();
+          persist();
         });
         wrap.appendChild(delBtn);
       }
@@ -382,6 +384,7 @@
         rm.addEventListener("click", () => {
           removePerson(p);
           render();
+          persist();
         });
         chip.appendChild(rm);
         chipsRow.appendChild(chip);
@@ -412,6 +415,7 @@
           addPerson(trimmed);
           newPersonInputValue = "";
           render();
+          persist();
         }
       }
       confirmBtn.addEventListener("click", confirmAdd);
@@ -666,6 +670,7 @@
     delBtn.addEventListener("click", () => {
       order.products = order.products.filter((p) => p.id !== product.id);
       render();
+      persist();
     });
 
     return row;
@@ -968,6 +973,7 @@
       editingProductId = null;
       personPickerAdding = false;
       render();
+      persist();
     });
     actions.appendChild(saveBtn);
 
