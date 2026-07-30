@@ -74,6 +74,8 @@
   let formOpen = false;
   let editingProductId = null;
   let personPickerAdding = false;
+  let peopleManagerOpen = false;
+  let newPersonInputValue = "";
 
   // ---------- Server-Sync ----------
   // Der State lebt im Server (shared/state.json). Wir laden ihn beim Start,
@@ -184,6 +186,18 @@
 
   function addPerson(name) {
     if (!state.people.includes(name)) state.people.push(name);
+  }
+
+  function removePerson(name) {
+    // Person aus der globalen Liste entfernen...
+    state.people = state.people.filter((p) => p !== name);
+    // ...und aus allen Produkten in allen Sammelbestellungen austragen,
+    // damit sie nirgends als "Geister-Teilnehmer" übrig bleibt.
+    state.orders.forEach((order) => {
+      order.products.forEach((product) => {
+        product.participants = product.participants.filter((p) => p !== name);
+      });
+    });
   }
 
   // ---------- Rendering ----------
@@ -324,8 +338,99 @@
     return wrap;
   }
 
+  function renderPeopleManagerSection() {
+    const section = document.createElement("section");
+    section.className = "section";
+
+    const head = document.createElement("div");
+    head.className = "section-head";
+    head.innerHTML = `<h2>${ICONS.users}Personen</h2>`;
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "btn secondary small";
+    toggleBtn.textContent = peopleManagerOpen ? "Schließen" : "Verwalten";
+    toggleBtn.addEventListener("click", () => {
+      peopleManagerOpen = !peopleManagerOpen;
+      newPersonInputValue = "";
+      render();
+    });
+    head.appendChild(toggleBtn);
+    section.appendChild(head);
+
+    if (peopleManagerOpen) {
+      const card = document.createElement("div");
+      card.className = "form-card";
+
+      const hint = document.createElement("div");
+      hint.className = "shipping-hint";
+      hint.style.margin = "0 0 4px";
+      hint.textContent = "Beim Entfernen wird die Person auch aus allen Produkten in allen Sammelbestellungen ausgetragen.";
+      card.appendChild(hint);
+
+      const chipsRow = document.createElement("div");
+      chipsRow.className = "chips-row";
+      state.people.forEach((p) => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = p + " ";
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "chip-remove";
+        rm.setAttribute("aria-label", `${p} entfernen`);
+        rm.innerHTML = ICONS.x;
+        rm.addEventListener("click", () => {
+          removePerson(p);
+          render();
+        });
+        chip.appendChild(rm);
+        chipsRow.appendChild(chip);
+      });
+      card.appendChild(chipsRow);
+
+      const addRow = document.createElement("div");
+      addRow.className = "add-row";
+      const input = document.createElement("input");
+      input.className = "add-input";
+      input.placeholder = "Neue Person…";
+      input.value = newPersonInputValue;
+      input.addEventListener("input", (e) => {
+        newPersonInputValue = e.target.value;
+      });
+      addRow.appendChild(input);
+
+      const confirmBtn = document.createElement("button");
+      confirmBtn.type = "button";
+      confirmBtn.className = "icon-btn confirm";
+      confirmBtn.setAttribute("aria-label", "Person hinzufügen");
+      confirmBtn.innerHTML = ICONS.check;
+      addRow.appendChild(confirmBtn);
+
+      function confirmAdd() {
+        const trimmed = newPersonInputValue.trim();
+        if (trimmed) {
+          addPerson(trimmed);
+          newPersonInputValue = "";
+          render();
+        }
+      }
+      confirmBtn.addEventListener("click", confirmAdd);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") confirmAdd();
+      });
+
+      card.appendChild(addRow);
+      section.appendChild(card);
+    }
+
+    return section;
+  }
+
   function renderOrderView(order) {
     const frag = document.createDocumentFragment();
+
+    // ---- Personen verwalten ----
+    frag.appendChild(renderPeopleManagerSection());
 
     // ---- Produkte section ----
     const productsSection = document.createElement("section");
@@ -524,27 +629,31 @@
     const perPerson = total / product.participants.length;
 
     row.innerHTML = `
-      <div class="product-main">
-        <div class="product-name">${product.qty}× ${esc(product.name)}</div>
-        <div class="product-people">${esc(product.participants.join(", "))}</div>
-      </div>
-      <div class="product-nums">
-        <div class="num-block">
-          <span class="num-label">Stückpreis</span>
-          <span class="num-val">${currency(product.price)}</span>
+      <div class="product-top">
+        <div class="product-main">
+          <div class="product-name">${product.qty}× ${esc(product.name)}</div>
+          <div class="product-people">${esc(product.participants.join(", "))}</div>
         </div>
-        <div class="num-block">
-          <span class="num-label">Gesamt</span>
-          <span class="num-val">${currency(total)}</span>
-        </div>
-        <div class="num-block">
-          <span class="num-label">Pro Person</span>
-          <span class="num-val accent">${currency(perPerson)}</span>
+        <div class="product-actions">
+          <button type="button" class="icon-btn-ghost" aria-label="Bearbeiten">${ICONS.pencil}</button>
+          <button type="button" class="icon-btn-ghost danger" aria-label="Löschen">${ICONS.trash}</button>
         </div>
       </div>
-      <div class="product-actions">
-        <button type="button" class="icon-btn-ghost" aria-label="Bearbeiten">${ICONS.pencil}</button>
-        <button type="button" class="icon-btn-ghost danger" aria-label="Löschen">${ICONS.trash}</button>
+      <div class="product-bottom">
+        <div class="product-nums">
+          <div class="num-block">
+            <span class="num-label">Stückpreis</span>
+            <span class="num-val">${currency(product.price)}</span>
+          </div>
+          <div class="num-block">
+            <span class="num-label">Gesamt</span>
+            <span class="num-val">${currency(total)}</span>
+          </div>
+          <div class="num-block">
+            <span class="num-label">Pro Person</span>
+            <span class="num-val accent">${currency(perPerson)}</span>
+          </div>
+        </div>
       </div>
     `;
 

@@ -183,28 +183,39 @@
 
   .product-row {
     display: flex;
-    align-items: center;
-    gap: 16px;
+    flex-direction: column;
+    gap: 10px;
     padding: 14px 16px;
     border-bottom: 1px solid #332F29;
   }
   .product-row:last-child { border-bottom: none; }
+  .product-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
   .product-main { flex: 1; min-width: 0; }
   .product-name { font-weight: 600; font-size: 14.5px; color: #EDE9E0; }
   .product-people {
     font-size: 12.5px;
     color: #8A8477;
-    margin-top: 2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    margin-top: 4px;
+    white-space: normal;
+    line-height: 1.5;
+  }
+  .product-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
   }
   .product-nums { display: flex; gap: 20px; }
-  .num-block { display: flex; flex-direction: column; align-items: flex-end; min-width: 72px; }
+  .num-block { display: flex; flex-direction: column; align-items: flex-start; min-width: 64px; }
   .num-label { font-size: 10.5px; color: #7A756A; text-transform: uppercase; letter-spacing: 0.03em; }
   .num-val { font-size: 14px; font-weight: 600; color: #D8D3C6; font-family: Georgia, serif; }
   .num-val.accent { color: #C98A54; }
-  .product-actions { display: flex; gap: 4px; }
+  .product-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .icon-btn-ghost {
     display: flex;
     align-items: center;
@@ -405,7 +416,6 @@
   svg { display: block; }
 
   @media (max-width: 520px) {
-    .product-row { flex-wrap: wrap; }
     .product-nums { gap: 14px; }
   }
 </style>
