@@ -421,6 +421,50 @@
 
   svg { display: block; }
 
+  /* ---- Bestätigungs-Dialog ---- */
+  .confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 1000;
+  }
+  .confirm-box {
+    background: #242220;
+    border: 1px solid #3A362E;
+    border-radius: 14px;
+    padding: 22px;
+    max-width: 360px;
+    width: 100%;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  }
+  .confirm-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: #EDE9E0;
+    margin-bottom: 8px;
+  }
+  .confirm-message {
+    font-size: 14px;
+    color: #B5AF9F;
+    line-height: 1.5;
+    margin-bottom: 20px;
+  }
+  .confirm-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+  .btn.danger-solid {
+    background: #E0705E;
+    color: #1C1A17;
+    border: none;
+  }
+  .btn.danger-solid:hover { background: #eb8271; }
+
   @media (max-width: 520px) {
     .product-nums { gap: 14px; }
   }

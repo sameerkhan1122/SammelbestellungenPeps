@@ -38,7 +38,7 @@
   }
 
   function makeOrder(title) {
-    return { id: uid(), title, products: [], shipping: "" };
+    return { id: uid(), title, products: [], shipping: "", discount: "" };
   }
 
   function defaultState() {
@@ -196,6 +196,52 @@
     });
   }
 
+  // ---------- Bestätigungs-Dialog ----------
+  // Generischer "Bist du sicher?"-Dialog für gefährliche Aktionen (z. B.
+  // Löschen). Wird an document.body gehängt, damit er ein normales render()
+  // übersteht, und ruft onConfirm() nur nach explizitem Bestätigen auf.
+  function showConfirmDialog({ title, message, confirmLabel = "Löschen", onConfirm }) {
+    const overlay = document.createElement("div");
+    overlay.className = "confirm-overlay";
+
+    const box = document.createElement("div");
+    box.className = "confirm-box";
+    box.innerHTML = `
+      <div class="confirm-title">${esc(title)}</div>
+      <div class="confirm-message">${esc(message)}</div>
+    `;
+
+    const actions = document.createElement("div");
+    actions.className = "confirm-actions";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn secondary form-btn";
+    cancelBtn.textContent = "Abbrechen";
+    cancelBtn.addEventListener("click", () => overlay.remove());
+
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "btn danger-solid form-btn";
+    confirmBtn.textContent = confirmLabel;
+    confirmBtn.addEventListener("click", () => {
+      overlay.remove();
+      onConfirm();
+    });
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+
+    // Klick auf den dunklen Hintergrund schließt den Dialog (wie Abbrechen)
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    document.body.appendChild(overlay);
+  }
+
   // ---------- Rendering ----------
 
   const root = document.getElementById("app");
@@ -290,16 +336,23 @@
         delBtn.setAttribute("aria-label", "Sammelbestellung löschen");
         delBtn.innerHTML = ICONS.xTiny;
         delBtn.addEventListener("click", () => {
-          const idx = state.orders.findIndex((o) => o.id === order.id);
-          state.orders = state.orders.filter((o) => o.id !== order.id);
-          if (state.activeId === order.id) {
-            const fallback = state.orders[Math.max(0, idx - 1)] || state.orders[0];
-            state.activeId = fallback.id;
-          }
-          formOpen = false;
-          editingProductId = null;
-          render();
-          persist();
+          showConfirmDialog({
+            title: "Sammelbestellung löschen?",
+            message: `"${order.title}" wird endgültig gelöscht, inklusive aller enthaltenen Produkte. Das kann nicht rückgängig gemacht werden.`,
+            confirmLabel: "Endgültig löschen",
+            onConfirm: () => {
+              const idx = state.orders.findIndex((o) => o.id === order.id);
+              state.orders = state.orders.filter((o) => o.id !== order.id);
+              if (state.activeId === order.id) {
+                const fallback = state.orders[Math.max(0, idx - 1)] || state.orders[0];
+                state.activeId = fallback.id;
+              }
+              formOpen = false;
+              editingProductId = null;
+              render();
+              persist();
+            },
+          });
         });
         wrap.appendChild(delBtn);
       }
@@ -477,7 +530,13 @@
     frag.appendChild(productsSection);
 
     // ---- Wer zahlt wie viel ----
-    const perPersonTotals = computePerPersonTotals(order);
+    const rawPerPersonTotals = computePerPersonTotals(order);
+    const discountNum = parseFloat(String(order.discount).replace(",", ".")) || 0;
+    const discountFactor = discountNum > 0 ? 1 - Math.min(discountNum, 100) / 100 : 1;
+    const perPersonTotals = rawPerPersonTotals.map(({ name, amount }) => ({
+      name,
+      amount: amount * discountFactor,
+    }));
     const shippingNum = parseFloat(String(order.shipping).replace(",", ".")) || 0;
     const shippingShare = perPersonTotals.length > 0 ? shippingNum / perPersonTotals.length : 0;
 
@@ -485,6 +544,14 @@
       const peopleSection = document.createElement("section");
       peopleSection.className = "section";
       peopleSection.innerHTML = `<div class="section-head"><h2>${ICONS.users}Wer zahlt wie viel</h2></div>`;
+
+      if (discountNum > 0) {
+        const discountNote = document.createElement("div");
+        discountNote.className = "shipping-hint";
+        discountNote.style.margin = "0 0 10px";
+        discountNote.textContent = `Mengenrabatt von ${discountNum}% wurde bereits abgezogen (gilt nicht für Versand).`;
+        peopleSection.appendChild(discountNote);
+      }
 
       const list = document.createElement("div");
       list.className = "person-list";
@@ -544,6 +611,39 @@
 
     frag.appendChild(shippingSection);
 
+    // ---- Mengenrabatt (optional) ----
+    const discountSection = document.createElement("section");
+    discountSection.className = "section";
+    discountSection.innerHTML = `<div class="section-head"><h2>Mengenrabatt (optional)</h2></div>`;
+
+    const discountRow = document.createElement("div");
+    discountRow.className = "shipping-row";
+    discountRow.innerHTML = `<span class="shipping-label">Rabatt (%)</span>`;
+    const discountInput = document.createElement("input");
+    discountInput.className = "text-input shipping-input";
+    discountInput.inputMode = "decimal";
+    discountInput.placeholder = "z. B. 15";
+    discountInput.value = order.discount;
+    discountInput.addEventListener("input", (e) => {
+      const v = e.target.value;
+      if (/^[0-9]*[.,]?[0-9]{0,2}$/.test(v)) {
+        order.discount = v;
+        persist();
+        render();
+      } else {
+        e.target.value = order.discount;
+      }
+    });
+    discountRow.appendChild(discountInput);
+    discountSection.appendChild(discountRow);
+
+    const discountHint = document.createElement("div");
+    discountHint.className = "shipping-hint";
+    discountHint.textContent = "Wird nur von den Pro-Person-Beträgen abgezogen, nicht vom Versand und nicht in der Produktliste.";
+    discountSection.appendChild(discountHint);
+
+    frag.appendChild(discountSection);
+
     // ---- Total bar ----
     frag.appendChild(renderTotalBar(order));
 
@@ -591,7 +691,13 @@
     if (oldBar) oldBar.replaceWith(renderTotalBar(order));
 
     // Update person shipping shares text without full re-render
-    const perPersonTotals = computePerPersonTotals(order);
+    const rawPerPersonTotals = computePerPersonTotals(order);
+    const discountNum = parseFloat(String(order.discount).replace(",", ".")) || 0;
+    const discountFactor = discountNum > 0 ? 1 - Math.min(discountNum, 100) / 100 : 1;
+    const perPersonTotals = rawPerPersonTotals.map(({ name, amount }) => ({
+      name,
+      amount: amount * discountFactor,
+    }));
     const shippingNum = parseFloat(String(order.shipping).replace(",", ".")) || 0;
     const shippingShare = perPersonTotals.length > 0 ? shippingNum / perPersonTotals.length : 0;
 
