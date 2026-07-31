@@ -9,6 +9,7 @@
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icons/icon-192.png" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
@@ -508,6 +509,74 @@
   @media (max-width: 520px) {
     .product-nums { gap: 14px; }
   }
+
+  /* ---- Preisliste ---- */
+  .pricelist-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: #242220;
+    border: 1px solid #3A362E;
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .pricelist-summary-text { font-size: 13.5px; color: #C7C1B2; }
+  .pricelist-summary-text strong { color: #EDE9E0; }
+  .pricelist-summary-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .file-input-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    border-radius: 8px;
+    background: #C98A54;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .file-input-label:hover { background: #B87940; }
+  .file-input-label input[type="file"] { display: none; }
+  .pricelist-error {
+    font-size: 12.5px;
+    color: #E0705E;
+    margin-top: 8px;
+  }
+  .pricelist-hint {
+    font-size: 12px;
+    color: #8A8477;
+    margin-top: 8px;
+    padding: 0 2px;
+  }
+
+  /* ---- Autocomplete ---- */
+  .autocomplete-wrap { position: relative; }
+  .autocomplete-list {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: #2A2723;
+    border: 1px solid #4A453C;
+    border-radius: 10px;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 50;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .autocomplete-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    cursor: pointer;
+    font-size: 13.5px;
+  }
+  .autocomplete-item:hover, .autocomplete-item.active { background: #3A362E; }
+  .autocomplete-item-name { color: #EDE9E0; font-weight: 500; }
+  .autocomplete-item-meta { color: #8A8477; font-size: 12px; flex-shrink: 0; text-align: right; }
 </style>
 </head>
 <body>

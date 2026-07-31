@@ -38,7 +38,7 @@
   }
 
   function makeOrder(title) {
-    return { id: uid(), title, products: [], shipping: "", discount: "" };
+    return { id: uid(), title, products: [], shipping: "", discount: "", priceList: [], priceListName: "" };
   }
 
   function defaultState() {
@@ -61,6 +61,115 @@
     return defaultState();
   }
 
+  // ---------- Preisliste (Excel-Import) ----------
+  // Erwartetes Format: Spalten "Produkt", "Menge", "Preis"
+  // (Groß-/Kleinschreibung und Reihenfolge egal). Wird komplett im Browser
+  // mit SheetJS geparst - kein Server-Roundtrip nötig, das Ergebnis landet
+  // einfach als normales Feld im Order-Objekt und wird wie alles andere
+  // synchronisiert.
+  const COLUMN_ALIASES = {
+    name: ["produkt", "product", "artikel", "name"],
+    qty: ["menge", "qty", "quantity", "anzahl"],
+    price: ["preis", "price", "kosten", "cost"],
+  };
+
+  function normalizeHeader(h) {
+    return String(h ?? "").trim().toLowerCase();
+  }
+
+  function findColumnKey(headerRow, aliases) {
+    for (let i = 0; i < headerRow.length; i++) {
+      const norm = normalizeHeader(headerRow[i]);
+      if (aliases.includes(norm)) return i;
+    }
+    return -1;
+  }
+
+  function parsePriceListWorkbook(arrayBuffer) {
+    const workbook = XLSX.read(arrayBuffer, { type: "array" });
+    const items = [];
+    let sawAnySheet = false;
+
+    workbook.SheetNames.forEach((sheetName) => {
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      if (rows.length === 0) return;
+      sawAnySheet = true;
+
+      const headerRow = rows[0];
+      const nameIdx = findColumnKey(headerRow, COLUMN_ALIASES.name);
+      const qtyIdx = findColumnKey(headerRow, COLUMN_ALIASES.qty);
+      const priceIdx = findColumnKey(headerRow, COLUMN_ALIASES.price);
+
+      // Produkt- und Preis-Spalte sind Pflicht; Menge optional.
+      if (nameIdx === -1 || priceIdx === -1) return;
+
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row) continue;
+        const name = String(row[nameIdx] ?? "").trim();
+        if (!name) continue;
+        const priceRaw = row[priceIdx];
+        const priceNum = parseFloat(String(priceRaw ?? "").replace(",", "."));
+        if (isNaN(priceNum)) continue;
+        const qtyRaw = qtyIdx !== -1 ? row[qtyIdx] : "";
+        const qtyNum = parseInt(String(qtyRaw ?? "").replace(/[^0-9-]/g, ""), 10);
+
+        items.push({
+          name,
+          qty: !isNaN(qtyNum) && qtyNum > 0 ? qtyNum : null,
+          price: Math.round(priceNum * 100) / 100,
+        });
+      }
+    });
+
+    if (!sawAnySheet) {
+      throw new Error("Die Datei enthält keine lesbaren Tabellenblätter.");
+    }
+    if (items.length === 0) {
+      throw new Error(
+        'Keine gültigen Zeilen gefunden. Erwartet werden Spalten "Produkt", "Menge" und "Preis" (Menge optional).'
+      );
+    }
+    return items;
+  }
+
+  function handlePriceListFile(order, file) {
+    priceListError = "";
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const items = parsePriceListWorkbook(e.target.result);
+        order.priceList = items;
+        order.priceListName = file.name;
+        priceListError = "";
+      } catch (err) {
+        priceListError = String(err.message || err);
+      }
+      render();
+      persist();
+    };
+    reader.onerror = () => {
+      priceListError = "Datei konnte nicht gelesen werden.";
+      render();
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function matchPriceListItems(order, query) {
+    const q = query.trim().toLowerCase();
+    if (!q || !order.priceList || order.priceList.length === 0) return [];
+    return order.priceList
+      .filter((item) => item.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const aStarts = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+        const bStarts = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+        if (aStarts !== bStarts) return aStarts - bStarts;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, 8);
+  }
+
   const state = loadLocalFallback(); // wird direkt nach Serverantwort überschrieben
   // UI-only (not persisted meaningfully across reload need, but fine to keep)
   let formOpen = false;
@@ -68,6 +177,9 @@
   let personPickerAdding = false;
   let peopleManagerOpen = false;
   let newPersonInputValue = "";
+  let priceListError = "";
+  let autocompleteOpen = false;
+  let autocompleteActiveIndex = -1;
 
   // ---------- Server-Sync ----------
   // Der State lebt im Server (shared/state.json). Wir laden ihn beim Start,
@@ -435,9 +547,16 @@
         rm.setAttribute("aria-label", `${p} entfernen`);
         rm.innerHTML = ICONS.x;
         rm.addEventListener("click", () => {
-          removePerson(p);
-          render();
-          persist();
+          showConfirmDialog({
+            title: "Person entfernen?",
+            message: `"${p}" wird aus der Personenliste entfernt und aus allen Produkten in allen Sammelbestellungen ausgetragen. Das kann nicht rückgängig gemacht werden.`,
+            confirmLabel: "Entfernen",
+            onConfirm: () => {
+              removePerson(p);
+              render();
+              persist();
+            },
+          });
         });
         chip.appendChild(rm);
         chipsRow.appendChild(chip);
@@ -483,16 +602,101 @@
     return section;
   }
 
+  function renderPriceListSection(order) {
+    const section = document.createElement("section");
+    section.className = "section";
+
+    const head = document.createElement("div");
+    head.className = "section-head";
+    head.innerHTML = `<h2>Preisliste</h2>`;
+    section.appendChild(head);
+
+    const summary = document.createElement("div");
+    summary.className = "pricelist-summary";
+
+    const text = document.createElement("div");
+    text.className = "pricelist-summary-text";
+    if (order.priceList.length > 0) {
+      text.innerHTML = `<strong>${order.priceList.length} Produkte</strong> geladen${
+        order.priceListName ? ` aus „${esc(order.priceListName)}“` : ""
+      }`;
+    } else {
+      text.textContent = "Noch keine Preisliste hochgeladen.";
+    }
+    summary.appendChild(text);
+
+    const actions = document.createElement("div");
+    actions.className = "pricelist-summary-actions";
+
+    const fileLabel = document.createElement("label");
+    fileLabel.className = "file-input-label";
+    fileLabel.textContent = order.priceList.length > 0 ? "Ersetzen" : "Hochladen";
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".xlsx,.xls";
+    fileInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (file) handlePriceListFile(order, file);
+      e.target.value = "";
+    });
+    fileLabel.appendChild(fileInput);
+    actions.appendChild(fileLabel);
+
+    if (order.priceList.length > 0) {
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.className = "btn secondary small";
+      clearBtn.textContent = "Entfernen";
+      clearBtn.addEventListener("click", () => {
+        showConfirmDialog({
+          title: "Preisliste entfernen?",
+          message: "Die geladene Preisliste wird entfernt. Bereits hinzugefügte Produkte bleiben erhalten.",
+          confirmLabel: "Entfernen",
+          onConfirm: () => {
+            order.priceList = [];
+            order.priceListName = "";
+            render();
+            persist();
+          },
+        });
+      });
+      actions.appendChild(clearBtn);
+    }
+
+    summary.appendChild(actions);
+    section.appendChild(summary);
+
+    if (priceListError) {
+      const err = document.createElement("div");
+      err.className = "pricelist-error";
+      err.textContent = priceListError;
+      section.appendChild(err);
+    }
+
+    const hint = document.createElement("div");
+    hint.className = "pricelist-hint";
+    hint.textContent =
+      'Excel-Datei (.xlsx) mit den Spalten "Produkt", "Menge" und "Preis". Beim Eintragen eines Produkts kann dann aus der Liste ausgewählt werden.';
+    section.appendChild(hint);
+
+    return section;
+  }
+
   function renderOrderView(order) {
     // Fallback für Sammelbestellungen, die vor dem Rabatt-Feature erstellt
     // wurden (dort existieren order.discount / order.discountEnabled noch nicht).
     if (order.discount == null) order.discount = "";
     if (order.discountEnabled == null) order.discountEnabled = false;
+    if (order.priceList == null) order.priceList = [];
+    if (order.priceListName == null) order.priceListName = "";
 
     const frag = document.createDocumentFragment();
 
     // ---- Personen verwalten ----
     frag.appendChild(renderPeopleManagerSection());
+
+    // ---- Preisliste ----
+    frag.appendChild(renderPriceListSection(order));
 
     // ---- Produkte section ----
     const productsSection = document.createElement("section");
@@ -867,15 +1071,25 @@
       render();
     });
     delBtn.addEventListener("click", () => {
-      order.products = order.products.filter((p) => p.id !== product.id);
-      render();
-      persist();
+      showConfirmDialog({
+        title: "Produkt löschen?",
+        message: `"${product.name}" wird endgültig aus dieser Sammelbestellung gelöscht. Das kann nicht rückgängig gemacht werden.`,
+        confirmLabel: "Endgültig löschen",
+        onConfirm: () => {
+          order.products = order.products.filter((p) => p.id !== product.id);
+          render();
+          persist();
+        },
+      });
     });
 
     return row;
   }
 
   function renderProductForm(order, initial) {
+    autocompleteOpen = false;
+    autocompleteActiveIndex = -1;
+
     const card = document.createElement("div");
     card.className = "form-card";
 
@@ -899,24 +1113,115 @@
       return { priceNum, priceValid, qtyNum, qtyValid, peopleCount, peopleValid, nameValid, total, perPerson, canSave };
     }
 
-    // --- Produkt name field ---
+    // --- Produkt name field (mit Autofill aus Preisliste) ---
     const nameField = document.createElement("div");
     nameField.className = "field";
     nameField.innerHTML = `<label class="label">Produkt</label>`;
+    const nameWrap = document.createElement("div");
+    nameWrap.className = "autocomplete-wrap";
     const nameInput = document.createElement("input");
     nameInput.className = "text-input";
+    nameInput.autocomplete = "off";
     nameInput.value = name;
-    nameInput.addEventListener("input", (e) => {
-      name = e.target.value;
-      updateValidation();
-    });
-    nameField.appendChild(nameInput);
+    nameWrap.appendChild(nameInput);
+    const autocompleteList = document.createElement("div");
+    autocompleteList.className = "autocomplete-list";
+    autocompleteList.style.display = "none";
+    nameWrap.appendChild(autocompleteList);
+    nameField.appendChild(nameWrap);
     const nameErr = document.createElement("div");
     nameErr.className = "err";
     nameErr.style.display = "none";
     nameErr.textContent = "Bitte einen Produktnamen eingeben.";
     nameField.appendChild(nameErr);
     card.appendChild(nameField);
+
+    function applyAutocompleteItem(item) {
+      name = item.name;
+      nameInput.value = item.name;
+      price = String(item.price);
+      priceInput.value = price;
+      if (item.qty != null) {
+        qty = String(item.qty);
+        qtyInput.value = qty;
+      }
+      closeAutocomplete();
+      updateValidation();
+      updateCountAndPreview();
+      nameInput.focus();
+    }
+
+    function closeAutocomplete() {
+      autocompleteOpen = false;
+      autocompleteActiveIndex = -1;
+      autocompleteList.style.display = "none";
+      autocompleteList.innerHTML = "";
+    }
+
+    function renderAutocomplete() {
+      const matches = matchPriceListItems(order, name);
+      if (matches.length === 0) {
+        closeAutocomplete();
+        return;
+      }
+      autocompleteOpen = true;
+      if (autocompleteActiveIndex >= matches.length) autocompleteActiveIndex = -1;
+      autocompleteList.innerHTML = "";
+      matches.forEach((item, idx) => {
+        const row = document.createElement("div");
+        row.className = "autocomplete-item" + (idx === autocompleteActiveIndex ? " active" : "");
+        row.innerHTML = `
+          <span class="autocomplete-item-name">
+            ${esc(item.name)}
+          </span>
+          <span class="autocomplete-item-meta">${currency(item.price)}</span>
+        `;
+        row.addEventListener("mousedown", (e) => {
+          // mousedown statt click, damit es vor dem blur des Inputs feuert
+          e.preventDefault();
+          applyAutocompleteItem(item);
+        });
+        autocompleteList.appendChild(row);
+      });
+      autocompleteList.style.display = "block";
+    }
+
+    nameInput.addEventListener("input", (e) => {
+      name = e.target.value;
+      autocompleteActiveIndex = -1;
+      updateValidation();
+      renderAutocomplete();
+    });
+    nameInput.addEventListener("focus", () => {
+      if (name.trim()) renderAutocomplete();
+    });
+    nameInput.addEventListener("blur", () => {
+      // kleine Verzögerung, damit ein mousedown auf einem Listeneintrag noch
+      // greifen kann, bevor die Liste verschwindet
+      setTimeout(closeAutocomplete, 100);
+    });
+    nameInput.addEventListener("keydown", (e) => {
+      if (!autocompleteOpen) return;
+      const items = autocompleteList.querySelectorAll(".autocomplete-item");
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        autocompleteActiveIndex = Math.min(autocompleteActiveIndex + 1, items.length - 1);
+        renderAutocomplete();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        autocompleteActiveIndex = Math.max(autocompleteActiveIndex - 1, 0);
+        renderAutocomplete();
+      } else if (e.key === "Enter") {
+        if (autocompleteActiveIndex >= 0) {
+          e.preventDefault();
+          const matches = matchPriceListItems(order, name);
+          const item = matches[autocompleteActiveIndex];
+          if (item) applyAutocompleteItem(item);
+        }
+      } else if (e.key === "Escape") {
+        closeAutocomplete();
+      }
+    });
 
     // --- Beteiligung field ---
     const participantsField = document.createElement("div");
