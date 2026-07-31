@@ -535,13 +535,8 @@
     frag.appendChild(productsSection);
 
     // ---- Wer zahlt wie viel ----
-    const rawPerPersonTotals = computePerPersonTotals(order);
+    const perPersonTotals = computePerPersonTotals(order);
     const discountNum = order.discountEnabled ? (parseFloat(String(order.discount).replace(",", ".")) || 0) : 0;
-    const discountFactor = discountNum > 0 ? 1 - Math.min(discountNum, 100) / 100 : 1;
-    const perPersonTotals = rawPerPersonTotals.map(({ name, amount }) => ({
-      name,
-      amount: amount * discountFactor,
-    }));
     const shippingNum = parseFloat(String(order.shipping).replace(",", ".")) || 0;
     const shippingShare = perPersonTotals.length > 0 ? shippingNum / perPersonTotals.length : 0;
 
@@ -552,7 +547,7 @@
 
       if (discountNum > 0) {
         const discountNote = document.createElement("div");
-        discountNote.className = "shipping-hint";
+        discountNote.className = "shipping-hint discount-note";
         discountNote.style.margin = "0 0 10px";
         discountNote.textContent = `Mengenrabatt von ${discountNum}% wurde bereits abgezogen (gilt nicht für Versand).`;
         peopleSection.appendChild(discountNote);
@@ -560,17 +555,21 @@
 
       const list = document.createElement("div");
       list.className = "person-list";
-      perPersonTotals.forEach(({ name, amount }) => {
+      perPersonTotals.forEach(({ name, amount, rawAmount }) => {
         const line = document.createElement("div");
         line.className = "person-line";
         const shippingHtml =
           shippingNum > 0
             ? `<span class="person-shipping">+ ${currency(shippingShare)} Versand</span>`
             : "";
+        const amountHtml =
+          rawAmount > amount
+            ? `<span class="num-val-old">${currency(rawAmount)}</span><span class="person-amount">${currency(amount)}</span>`
+            : `<span class="person-amount">${currency(amount)}</span>`;
         line.innerHTML = `
           <span class="person-name">${esc(name)}</span>
           <div class="person-amount-block">
-            <span class="person-amount">${currency(amount)}</span>
+            ${amountHtml}
             ${shippingHtml}
           </div>
         `;
@@ -587,6 +586,7 @@
 
     const shippingRow = document.createElement("div");
     shippingRow.className = "shipping-row";
+    shippingRow.id = "shipping-row";
     shippingRow.innerHTML = `<span class="shipping-label">Versandkosten ($)</span>`;
     const shippingInput = document.createElement("input");
     shippingInput.className = "text-input shipping-input";
@@ -653,7 +653,7 @@
         if (/^[0-9]*[.,]?[0-9]{0,2}$/.test(v)) {
           order.discount = v;
           persist();
-          render();
+          renderDiscountEffects(order);
         } else {
           e.target.value = order.discount;
         }
@@ -675,24 +675,48 @@
     return frag;
   }
 
+  function getDiscountFactor(order) {
+    if (!order.discountEnabled) return 1;
+    const discountNum = parseFloat(String(order.discount).replace(",", ".")) || 0;
+    return discountNum > 0 ? 1 - Math.min(discountNum, 100) / 100 : 1;
+  }
+
   function computePerPersonTotals(order) {
+    const factor = getDiscountFactor(order);
     const map = {};
+    const rawMap = {};
     for (const p of order.products) {
-      const total = p.price * p.qty;
+      const discountedPrice = p.price * factor;
+      const total = discountedPrice * p.qty;
+      const rawTotal = p.price * p.qty;
       const share = total / p.participants.length;
+      const rawShare = rawTotal / p.participants.length;
       for (const person of p.participants) {
         map[person] = (map[person] || 0) + share;
+        rawMap[person] = (rawMap[person] || 0) + rawShare;
       }
     }
     return Object.entries(map)
-      .map(([name, amount]) => ({ name, amount }))
+      .map(([name, amount]) => ({ name, amount, rawAmount: rawMap[name] }))
       .sort((a, b) => b.amount - a.amount);
   }
 
   function renderTotalBar(order) {
+    const factor = getDiscountFactor(order);
     const subtotal = order.products.reduce((sum, p) => sum + p.price * p.qty, 0);
+    const discountedSubtotal = subtotal * factor;
     const shippingNum = parseFloat(String(order.shipping).replace(",", ".")) || 0;
     const total = subtotal + shippingNum;
+    const discountedTotal = discountedSubtotal + shippingNum;
+
+    const subtotalHtml =
+      factor < 1
+        ? `<span class="total-old">${currency(subtotal)}</span> ${currency(discountedSubtotal)}`
+        : currency(subtotal);
+    const totalHtml =
+      factor < 1
+        ? `<span class="total-old">${currency(total)}</span> ${currency(discountedTotal)}`
+        : currency(total);
 
     const bar = document.createElement("div");
     bar.className = "total-bar";
@@ -700,14 +724,53 @@
     bar.innerHTML = `
       <div class="total-line">
         <span>Gesamt ohne Versand</span>
-        <strong>${currency(subtotal)}</strong>
+        <strong>${subtotalHtml}</strong>
       </div>
       <div class="total-line main">
         <span>Gesamtsumme</span>
-        <strong>${currency(total)}</strong>
+        <strong>${totalHtml}</strong>
       </div>
     `;
     return bar;
+  }
+
+  function renderDiscountEffects(order) {
+    // Aktualisiert alles, was vom Rabatt betroffen ist (Produktzeilen,
+    // Personenliste, Totalbar), OHNE das Rabatt-Eingabefeld selbst neu zu
+    // erzeugen - so bleibt der Fokus (und damit die Tastatur) erhalten.
+
+    // Produktzeilen ersetzen
+    const list = document.querySelector(".product-list");
+    if (list) {
+      const newList = document.createElement("div");
+      newList.className = "product-list";
+      order.products.forEach((p) => newList.appendChild(renderProductRow(order, p)));
+      list.replaceWith(newList);
+    }
+
+    // Rabatt-Hinweistext oben in "Wer zahlt wie viel"
+    const discountNum = order.discountEnabled ? (parseFloat(String(order.discount).replace(",", ".")) || 0) : 0;
+    const discountNoteExisting = document.querySelector(".discount-note");
+    if (discountNum > 0) {
+      const text = `Mengenrabatt von ${discountNum}% wurde bereits abgezogen (gilt nicht für Versand).`;
+      if (discountNoteExisting) {
+        discountNoteExisting.textContent = text;
+      } else {
+        const peopleSection = document.querySelector(".person-list")?.parentElement;
+        if (peopleSection) {
+          const note = document.createElement("div");
+          note.className = "shipping-hint discount-note";
+          note.style.margin = "0 0 10px";
+          note.textContent = text;
+          peopleSection.insertBefore(note, peopleSection.querySelector(".person-list"));
+        }
+      }
+    } else if (discountNoteExisting) {
+      discountNoteExisting.remove();
+    }
+
+    // Personenbeträge + Totalbar (bestehende Logik)
+    renderTotalsOnly(order);
   }
 
   function renderTotalsOnly(order) {
@@ -716,13 +779,7 @@
     if (oldBar) oldBar.replaceWith(renderTotalBar(order));
 
     // Update person shipping shares text without full re-render
-    const rawPerPersonTotals = computePerPersonTotals(order);
-    const discountNum = order.discountEnabled ? (parseFloat(String(order.discount).replace(",", ".")) || 0) : 0;
-    const discountFactor = discountNum > 0 ? 1 - Math.min(discountNum, 100) / 100 : 1;
-    const perPersonTotals = rawPerPersonTotals.map(({ name, amount }) => ({
-      name,
-      amount: amount * discountFactor,
-    }));
+    const perPersonTotals = computePerPersonTotals(order);
     const shippingNum = parseFloat(String(order.shipping).replace(",", ".")) || 0;
     const shippingShare = perPersonTotals.length > 0 ? shippingNum / perPersonTotals.length : 0;
 
@@ -735,7 +792,11 @@
         shippingNum > 0
           ? `<span class="person-shipping">+ ${currency(shippingShare)} Versand</span>`
           : "";
-      block.innerHTML = `<span class="person-amount">${currency(entry.amount)}</span>${shippingHtml}`;
+      const amountHtml =
+        entry.rawAmount > entry.amount
+          ? `<span class="num-val-old">${currency(entry.rawAmount)}</span><span class="person-amount">${currency(entry.amount)}</span>`
+          : `<span class="person-amount">${currency(entry.amount)}</span>`;
+      block.innerHTML = `${amountHtml}${shippingHtml}`;
     });
 
     const hintExisting = document.querySelector(".shipping-hint");
@@ -746,7 +807,7 @@
       if (hintExisting) {
         hintExisting.textContent = text;
       } else {
-        const shippingSection = document.querySelector(".shipping-row").parentElement;
+        const shippingSection = document.getElementById("shipping-row").parentElement;
         const hint = document.createElement("div");
         hint.className = "shipping-hint";
         hint.textContent = text;
@@ -760,8 +821,15 @@
   function renderProductRow(order, product) {
     const row = document.createElement("div");
     row.className = "product-row";
-    const total = product.price * product.qty;
+    const factor = getDiscountFactor(order);
+    const discountedPrice = product.price * factor;
+    const total = discountedPrice * product.qty;
     const perPerson = total / product.participants.length;
+
+    const priceHtml =
+      factor < 1
+        ? `<span class="num-val-old">${currency(product.price)}</span><span class="num-val">${currency(discountedPrice)}</span>`
+        : `<span class="num-val">${currency(product.price)}</span>`;
 
     row.innerHTML = `
       <div class="product-top">
@@ -778,7 +846,7 @@
         <div class="product-nums">
           <div class="num-block">
             <span class="num-label">Stückpreis</span>
-            <span class="num-val">${currency(product.price)}</span>
+            ${priceHtml}
           </div>
           <div class="num-block num-block-total">
             <span class="num-label">Gesamt</span>
