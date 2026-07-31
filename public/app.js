@@ -484,6 +484,11 @@
   }
 
   function renderOrderView(order) {
+    // Fallback für Sammelbestellungen, die vor dem Rabatt-Feature erstellt
+    // wurden (dort existieren order.discount / order.discountEnabled noch nicht).
+    if (order.discount == null) order.discount = "";
+    if (order.discountEnabled == null) order.discountEnabled = false;
+
     const frag = document.createDocumentFragment();
 
     // ---- Personen verwalten ----
@@ -531,7 +536,7 @@
 
     // ---- Wer zahlt wie viel ----
     const rawPerPersonTotals = computePerPersonTotals(order);
-    const discountNum = parseFloat(String(order.discount).replace(",", ".")) || 0;
+    const discountNum = order.discountEnabled ? (parseFloat(String(order.discount).replace(",", ".")) || 0) : 0;
     const discountFactor = discountNum > 0 ? 1 - Math.min(discountNum, 100) / 100 : 1;
     const perPersonTotals = rawPerPersonTotals.map(({ name, amount }) => ({
       name,
@@ -614,33 +619,53 @@
     // ---- Mengenrabatt (optional) ----
     const discountSection = document.createElement("section");
     discountSection.className = "section";
-    discountSection.innerHTML = `<div class="section-head"><h2>Mengenrabatt (optional)</h2></div>`;
 
-    const discountRow = document.createElement("div");
-    discountRow.className = "shipping-row";
-    discountRow.innerHTML = `<span class="shipping-label">Rabatt (%)</span>`;
-    const discountInput = document.createElement("input");
-    discountInput.className = "text-input shipping-input";
-    discountInput.inputMode = "decimal";
-    discountInput.placeholder = "z. B. 15";
-    discountInput.value = order.discount;
-    discountInput.addEventListener("input", (e) => {
-      const v = e.target.value;
-      if (/^[0-9]*[.,]?[0-9]{0,2}$/.test(v)) {
-        order.discount = v;
-        persist();
-        render();
-      } else {
-        e.target.value = order.discount;
-      }
+    const discountHead = document.createElement("div");
+    discountHead.className = "section-head";
+    discountHead.innerHTML = `<h2>Mengenrabatt</h2>`;
+
+    const discountToggle = document.createElement("button");
+    discountToggle.type = "button";
+    discountToggle.className = "switch" + (order.discountEnabled ? " on" : "");
+    discountToggle.setAttribute("role", "switch");
+    discountToggle.setAttribute("aria-checked", String(order.discountEnabled));
+    discountToggle.innerHTML = `<span class="switch-knob"></span>`;
+    discountToggle.addEventListener("click", () => {
+      order.discountEnabled = !order.discountEnabled;
+      if (!order.discountEnabled) order.discount = "";
+      persist();
+      render();
     });
-    discountRow.appendChild(discountInput);
-    discountSection.appendChild(discountRow);
+    discountHead.appendChild(discountToggle);
+    discountSection.appendChild(discountHead);
 
-    const discountHint = document.createElement("div");
-    discountHint.className = "shipping-hint";
-    discountHint.textContent = "Wird nur von den Pro-Person-Beträgen abgezogen, nicht vom Versand und nicht in der Produktliste.";
-    discountSection.appendChild(discountHint);
+    if (order.discountEnabled) {
+      const discountRow = document.createElement("div");
+      discountRow.className = "shipping-row";
+      discountRow.innerHTML = `<span class="shipping-label">Rabatt (%)</span>`;
+      const discountInput = document.createElement("input");
+      discountInput.className = "text-input shipping-input";
+      discountInput.inputMode = "decimal";
+      discountInput.placeholder = "z. B. 15";
+      discountInput.value = order.discount;
+      discountInput.addEventListener("input", (e) => {
+        const v = e.target.value;
+        if (/^[0-9]*[.,]?[0-9]{0,2}$/.test(v)) {
+          order.discount = v;
+          persist();
+          render();
+        } else {
+          e.target.value = order.discount;
+        }
+      });
+      discountRow.appendChild(discountInput);
+      discountSection.appendChild(discountRow);
+
+      const discountHint = document.createElement("div");
+      discountHint.className = "shipping-hint";
+      discountHint.textContent = "Wird nur von den Pro-Person-Beträgen abgezogen, nicht vom Versand und nicht in der Produktliste.";
+      discountSection.appendChild(discountHint);
+    }
 
     frag.appendChild(discountSection);
 
@@ -692,7 +717,7 @@
 
     // Update person shipping shares text without full re-render
     const rawPerPersonTotals = computePerPersonTotals(order);
-    const discountNum = parseFloat(String(order.discount).replace(",", ".")) || 0;
+    const discountNum = order.discountEnabled ? (parseFloat(String(order.discount).replace(",", ".")) || 0) : 0;
     const discountFactor = discountNum > 0 ? 1 - Math.min(discountNum, 100) / 100 : 1;
     const perPersonTotals = rawPerPersonTotals.map(({ name, amount }) => ({
       name,
