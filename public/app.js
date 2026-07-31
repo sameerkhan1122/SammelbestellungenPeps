@@ -649,9 +649,9 @@
             <span class="num-label">Stückpreis</span>
             <span class="num-val">${currency(product.price)}</span>
           </div>
-          <div class="num-block">
+          <div class="num-block num-block-total">
             <span class="num-label">Gesamt</span>
-            <span class="num-val">${currency(total)}</span>
+            <span class="num-val num-val-total">${currency(total)}</span>
           </div>
           <div class="num-block">
             <span class="num-label">Pro Person</span>
