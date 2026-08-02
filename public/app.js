@@ -753,7 +753,7 @@
         const discountNote = document.createElement("div");
         discountNote.className = "shipping-hint discount-note";
         discountNote.style.margin = "0 0 10px";
-        discountNote.textContent = `Mengenrabatt von ${discountNum}% wurde bereits abgezogen (gilt nicht für Versand).`;
+        discountNote.textContent = `Rabatt von ${discountNum}% wurde bereits abgezogen (gilt nicht für Versand).`;
         peopleSection.appendChild(discountNote);
       }
 
@@ -820,13 +820,13 @@
 
     frag.appendChild(shippingSection);
 
-    // ---- Mengenrabatt (optional) ----
+    // ---- Rabatt (optional) ----
     const discountSection = document.createElement("section");
     discountSection.className = "section";
 
     const discountHead = document.createElement("div");
     discountHead.className = "section-head";
-    discountHead.innerHTML = `<h2>Mengenrabatt</h2>`;
+    discountHead.innerHTML = `<h2>Rabatt</h2>`;
 
     const discountToggle = document.createElement("button");
     discountToggle.type = "button";
@@ -876,7 +876,105 @@
     // ---- Total bar ----
     frag.appendChild(renderTotalBar(order));
 
+    // ---- Rechnung für den Verkäufer ----
+    if (order.products.length > 0) {
+      frag.appendChild(renderInvoiceSection(order));
+    }
+
     return frag;
+  }
+
+  function buildInvoiceText(order) {
+    const factor = getDiscountFactor(order);
+    const discountNum = order.discountEnabled ? (parseFloat(String(order.discount).replace(",", ".")) || 0) : 0;
+    const shippingNum = parseFloat(String(order.shipping).replace(",", ".")) || 0;
+
+    // Gleiche Produkte (gleicher Name + gleicher Preis) zusammenfassen,
+    // ohne Bezug auf die Personen, die es bestellt haben.
+    const grouped = new Map();
+    for (const p of order.products) {
+      const key = p.name + "|" + p.price;
+      if (grouped.has(key)) {
+        grouped.get(key).qty += p.qty;
+      } else {
+        grouped.set(key, { name: p.name, price: p.price, qty: p.qty });
+      }
+    }
+    const items = Array.from(grouped.values());
+
+    const subtotal = items.reduce((sum, it) => sum + it.price * it.qty, 0);
+    const discountedSubtotal = subtotal * factor;
+    const total = discountedSubtotal + shippingNum;
+
+    const lines = [];
+    if (order.title) lines.push(order.title);
+    if (lines.length) lines.push("");
+
+    items.forEach((it) => {
+      lines.push(`${it.qty}x ${it.name} - ${currency(it.price * it.qty)}`);
+    });
+
+    lines.push("");
+    lines.push(`Subtotal: ${currency(subtotal)}`);
+    if (discountNum > 0) {
+      lines.push(`Discount (${discountNum}%): -${currency(subtotal - discountedSubtotal)}`);
+    }
+    if (shippingNum > 0) {
+      lines.push(`Shipping: ${currency(shippingNum)}`);
+    }
+    lines.push(`Total: ${currency(total)}`);
+
+    return lines.join("\n");
+  }
+
+  function renderInvoiceSection(order) {
+    const section = document.createElement("section");
+    section.className = "section";
+
+    const head = document.createElement("div");
+    head.className = "section-head";
+    head.innerHTML = `<h2>Rechnung für den Verkäufer</h2>`;
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "btn secondary small";
+    copyBtn.textContent = "Kopieren";
+    head.appendChild(copyBtn);
+    section.appendChild(head);
+
+    const hint = document.createElement("div");
+    hint.className = "invoice-hint";
+    hint.style.margin = "0 0 10px";
+    hint.textContent = "Alle Produkte zusammengerechnet, ohne Namen der Bestellenden. Kann direkt kopiert und an den Verkäufer geschickt werden.";
+    section.appendChild(hint);
+
+    const textarea = document.createElement("textarea");
+    textarea.className = "invoice-textarea";
+    textarea.readOnly = true;
+    textarea.spellcheck = false;
+    textarea.value = buildInvoiceText(order);
+    textarea.rows = Math.min(20, Math.max(6, textarea.value.split("\n").length + 1));
+    section.appendChild(textarea);
+
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(textarea.value);
+      } catch (err) {
+        // Fallback für Browser ohne Clipboard-API-Berechtigung
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+      }
+      const original = copyBtn.textContent;
+      copyBtn.textContent = "Kopiert!";
+      copyBtn.disabled = true;
+      setTimeout(() => {
+        copyBtn.textContent = original;
+        copyBtn.disabled = false;
+      }, 1500);
+    });
+
+    return section;
   }
 
   function getDiscountFactor(order) {
@@ -956,7 +1054,7 @@
     const discountNum = order.discountEnabled ? (parseFloat(String(order.discount).replace(",", ".")) || 0) : 0;
     const discountNoteExisting = document.querySelector(".discount-note");
     if (discountNum > 0) {
-      const text = `Mengenrabatt von ${discountNum}% wurde bereits abgezogen (gilt nicht für Versand).`;
+      const text = `Rabatt von ${discountNum}% wurde bereits abgezogen (gilt nicht für Versand).`;
       if (discountNoteExisting) {
         discountNoteExisting.textContent = text;
       } else {
@@ -981,6 +1079,13 @@
     // Lightweight refresh for shipping input changes without losing focus / full re-render
     const oldBar = document.getElementById("total-bar");
     if (oldBar) oldBar.replaceWith(renderTotalBar(order));
+
+    // Rechnungstext live aktualisieren (Menge/Preis/Rabatt/Versand können
+    // sich geändert haben)
+    const invoiceTextarea = document.querySelector(".invoice-textarea");
+    if (invoiceTextarea) {
+      invoiceTextarea.value = buildInvoiceText(order);
+    }
 
     // Update person shipping shares text without full re-render
     const perPersonTotals = computePerPersonTotals(order);
