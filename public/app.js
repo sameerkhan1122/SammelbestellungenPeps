@@ -31,6 +31,37 @@
     return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  function currencyEUR(n) {
+    return "€" + n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Dollarbetrag mit Euro-Gegenwert in Klammern (für die normale Seitenansicht).
+  // Fällt auf reinen Dollarbetrag zurück, wenn kein gültiger Kurs eingetragen ist.
+  // Das Euro-<span> trägt den rohen USD-Betrag als data-usd, damit
+  // refreshAllAmounts() bei einer Kursänderung nur den Text aktualisieren muss,
+  // ohne die Elemente neu zu erzeugen (sonst würde z. B. der Fokus im
+  // Kurs-Eingabefeld bei jedem Tastendruck verloren gehen).
+  function currencyBoth(n, order) {
+    const rate = parseFloat(String(order.eurRate).replace(",", ".")) || 0;
+    const eurText = rate > 0 ? currencyEUR(n * rate) : "";
+    const hiddenStyle = rate > 0 ? "" : ' style="display:none"';
+    return `${currency(n)} <span class="eur-amount" data-usd="${n}"${hiddenStyle}>(${eurText})</span>`;
+  }
+
+  function refreshAllAmounts(order) {
+    const rate = parseFloat(String(order.eurRate).replace(",", ".")) || 0;
+    document.querySelectorAll(".eur-amount[data-usd]").forEach((el) => {
+      const usd = parseFloat(el.getAttribute("data-usd"));
+      if (isNaN(usd)) return;
+      if (rate > 0) {
+        el.textContent = `(${currencyEUR(usd * rate)})`;
+        el.style.display = "";
+      } else {
+        el.style.display = "none";
+      }
+    });
+  }
+
   function esc(s) {
     const d = document.createElement("div");
     d.textContent = s;
@@ -38,7 +69,7 @@
   }
 
   function makeOrder(title) {
-    return { id: uid(), title, products: [], shipping: "", discount: "", priceList: [], priceListName: "" };
+    return { id: uid(), title, products: [], shipping: "", discount: "", priceList: [], priceListName: "", eurRate: "0.865" };
   }
 
   function defaultState() {
@@ -604,33 +635,28 @@
 
   function renderPriceListSection(order) {
     const section = document.createElement("section");
-    section.className = "section";
+    section.className = "section pricelist-section-compact";
 
-    const head = document.createElement("div");
-    head.className = "section-head";
-    head.innerHTML = `<h2>Preisliste</h2>`;
-    section.appendChild(head);
-
-    const summary = document.createElement("div");
-    summary.className = "pricelist-summary";
+    const row = document.createElement("div");
+    row.className = "pricelist-compact-row";
 
     const text = document.createElement("div");
-    text.className = "pricelist-summary-text";
+    text.className = "pricelist-compact-text";
     if (order.priceList.length > 0) {
-      text.innerHTML = `<strong>${order.priceList.length} Produkte</strong> geladen${
-        order.priceListName ? ` aus „${esc(order.priceListName)}“` : ""
+      text.innerHTML = `Preisliste: <strong>${order.priceList.length} Produkte</strong>${
+        order.priceListName ? ` (${esc(order.priceListName)})` : ""
       }`;
     } else {
-      text.textContent = "Noch keine Preisliste hochgeladen.";
+      text.textContent = "Keine Preisliste hochgeladen";
     }
-    summary.appendChild(text);
+    row.appendChild(text);
 
     const actions = document.createElement("div");
-    actions.className = "pricelist-summary-actions";
+    actions.className = "pricelist-compact-actions";
 
     const fileLabel = document.createElement("label");
-    fileLabel.className = "file-input-label";
-    fileLabel.textContent = order.priceList.length > 0 ? "Ersetzen" : "Hochladen";
+    fileLabel.className = "file-input-label-compact";
+    fileLabel.textContent = order.priceList.length > 0 ? "Ersetzen" : "Preisliste hochladen (.xlsx)";
     const fileInput = document.createElement("input");
     fileInput.type = "file";
     fileInput.accept = ".xlsx,.xls";
@@ -645,7 +671,7 @@
     if (order.priceList.length > 0) {
       const clearBtn = document.createElement("button");
       clearBtn.type = "button";
-      clearBtn.className = "btn secondary small";
+      clearBtn.className = "pricelist-compact-remove";
       clearBtn.textContent = "Entfernen";
       clearBtn.addEventListener("click", () => {
         showConfirmDialog({
@@ -663,8 +689,8 @@
       actions.appendChild(clearBtn);
     }
 
-    summary.appendChild(actions);
-    section.appendChild(summary);
+    row.appendChild(actions);
+    section.appendChild(row);
 
     if (priceListError) {
       const err = document.createElement("div");
@@ -672,12 +698,6 @@
       err.textContent = priceListError;
       section.appendChild(err);
     }
-
-    const hint = document.createElement("div");
-    hint.className = "pricelist-hint";
-    hint.textContent =
-      'Excel-Datei (.xlsx) mit den Spalten "Produkt", "Menge" und "Preis". Beim Eintragen eines Produkts kann dann aus der Liste ausgewählt werden.';
-    section.appendChild(hint);
 
     return section;
   }
@@ -689,23 +709,24 @@
     if (order.discountEnabled == null) order.discountEnabled = false;
     if (order.priceList == null) order.priceList = [];
     if (order.priceListName == null) order.priceListName = "";
+    if (order.eurRate == null) order.eurRate = "0.865";
 
     const frag = document.createDocumentFragment();
 
     // ---- Personen verwalten ----
     frag.appendChild(renderPeopleManagerSection());
 
-    // ---- Preisliste ----
-    frag.appendChild(renderPriceListSection(order));
-
-    // ---- Produkte section ----
+    // ---- Produkte section (Kernstück der Seite -> visuell hervorgehoben) ----
     const productsSection = document.createElement("section");
-    productsSection.className = "section";
+    productsSection.className = "section products-section-highlight";
 
     const productsHead = document.createElement("div");
     productsHead.className = "section-head";
-    productsHead.innerHTML = `<h2>Produkte</h2>`;
-    if (!formOpen) {
+    productsHead.innerHTML = `<h2 class="products-title">Produkte</h2>`;
+    const hasProducts = order.products.length > 0;
+    if (!formOpen && hasProducts) {
+      // Schon Produkte da -> kompakter Button oben rechts, damit die Liste im
+      // Vordergrund bleibt.
       const addBtn = document.createElement("button");
       addBtn.type = "button";
       addBtn.className = "btn primary small";
@@ -724,12 +745,25 @@
       productsSection.appendChild(renderProductForm(order, editingProduct));
     }
 
-    if (order.products.length === 0 && !formOpen) {
+    if (!hasProducts && !formOpen) {
+      // Noch keine Produkte -> großer, gut sichtbarer Einstiegspunkt, damit
+      // sofort klar ist, dass und wie man loslegt.
       const empty = document.createElement("div");
       empty.className = "empty";
       empty.textContent = "Noch keine Produkte eingetragen.";
       productsSection.appendChild(empty);
-    } else if (order.products.length > 0) {
+
+      const addBtnBig = document.createElement("button");
+      addBtnBig.type = "button";
+      addBtnBig.className = "btn primary large products-cta";
+      addBtnBig.innerHTML = `${ICONS.plus}Produkt hinzufügen`;
+      addBtnBig.addEventListener("click", () => {
+        formOpen = true;
+        editingProductId = null;
+        render();
+      });
+      productsSection.appendChild(addBtnBig);
+    } else if (hasProducts) {
       const list = document.createElement("div");
       list.className = "product-list";
       order.products.forEach((p) => list.appendChild(renderProductRow(order, p)));
@@ -764,12 +798,12 @@
         line.className = "person-line";
         const shippingHtml =
           shippingNum > 0
-            ? `<span class="person-shipping">+ ${currency(shippingShare)} Versand</span>`
+            ? `<span class="person-shipping">+ ${currencyBoth(shippingShare, order)} Versand</span>`
             : "";
         const amountHtml =
           rawAmount > amount
-            ? `<span class="num-val-old">${currency(rawAmount)}</span><span class="person-amount">${currency(amount)}</span>`
-            : `<span class="person-amount">${currency(amount)}</span>`;
+            ? `<span class="num-val-old">${currency(rawAmount)}</span><span class="person-amount">${currencyBoth(amount, order)}</span>`
+            : `<span class="person-amount">${currencyBoth(amount, order)}</span>`;
         line.innerHTML = `
           <span class="person-name">${esc(name)}</span>
           <div class="person-amount-block">
@@ -812,9 +846,9 @@
     if (shippingNum > 0 && perPersonTotals.length > 0) {
       const hint = document.createElement("div");
       hint.className = "shipping-hint";
-      hint.textContent = `Wird gleichmäßig auf ${perPersonTotals.length} ${
+      hint.innerHTML = `Wird gleichmäßig auf ${perPersonTotals.length} ${
         perPersonTotals.length === 1 ? "Person" : "Personen"
-      } aufgeteilt: ${currency(shippingShare)} pro Person.`;
+      } aufgeteilt: ${currencyBoth(shippingShare, order)} pro Person.`;
       shippingSection.appendChild(hint);
     }
 
@@ -873,6 +907,9 @@
 
     frag.appendChild(discountSection);
 
+    // ---- Wechselkurs (für die EUR-Anzeige neben den Dollarpreisen) ----
+    frag.appendChild(renderEurRateSection(order));
+
     // ---- Total bar ----
     frag.appendChild(renderTotalBar(order));
 
@@ -880,6 +917,9 @@
     if (order.products.length > 0) {
       frag.appendChild(renderInvoiceSection(order));
     }
+
+    // ---- Preisliste (Verwaltung, unauffällig am Ende) ----
+    frag.appendChild(renderPriceListSection(order));
 
     return frag;
   }
@@ -906,15 +946,18 @@
     const discountedSubtotal = subtotal * factor;
     const total = discountedSubtotal + shippingNum;
 
+    // WhatsApp rendert *text* fett und _text_ kursiv, wenn eingefügt -
+    // das nutzen wir, damit Bestellung und Summe auf einen Blick klar sind.
     const lines = [];
-    if (order.title) lines.push(order.title);
-    if (lines.length) lines.push("");
+    lines.push(`*${order.title || "Bestellung"}*`);
+    lines.push("");
 
     items.forEach((it) => {
-      lines.push(`${it.qty}x ${it.name} - ${currency(it.price * it.qty)}`);
+      lines.push(`${it.qty}x ${it.name} — ${currency(it.price * it.qty)}`);
     });
 
     lines.push("");
+    lines.push("_____________");
     lines.push(`Subtotal: ${currency(subtotal)}`);
     if (discountNum > 0) {
       lines.push(`Discount (${discountNum}%): -${currency(subtotal - discountedSubtotal)}`);
@@ -922,7 +965,7 @@
     if (shippingNum > 0) {
       lines.push(`Shipping: ${currency(shippingNum)}`);
     }
-    lines.push(`Total: ${currency(total)}`);
+    lines.push(`*Total: ${currency(total)}*`);
 
     return lines.join("\n");
   }
@@ -945,7 +988,7 @@
     const hint = document.createElement("div");
     hint.className = "invoice-hint";
     hint.style.margin = "0 0 10px";
-    hint.textContent = "Alle Produkte zusammengerechnet, ohne Namen der Bestellenden. Kann direkt kopiert und an den Verkäufer geschickt werden.";
+    hint.textContent = "Alle Produkte zusammengerechnet, ohne Namen der Bestellenden. Kann direkt kopiert und z. B. bei WhatsApp an den Verkäufer geschickt werden.";
     section.appendChild(hint);
 
     const textarea = document.createElement("textarea");
@@ -1013,12 +1056,12 @@
 
     const subtotalHtml =
       factor < 1
-        ? `<span class="total-old">${currency(subtotal)}</span> ${currency(discountedSubtotal)}`
-        : currency(subtotal);
+        ? `<span class="total-old">${currency(subtotal)}</span> ${currencyBoth(discountedSubtotal, order)}`
+        : currencyBoth(subtotal, order);
     const totalHtml =
       factor < 1
-        ? `<span class="total-old">${currency(total)}</span> ${currency(discountedTotal)}`
-        : currency(total);
+        ? `<span class="total-old">${currency(total)}</span> ${currencyBoth(discountedTotal, order)}`
+        : currencyBoth(total, order);
 
     const bar = document.createElement("div");
     bar.className = "total-bar";
@@ -1034,6 +1077,33 @@
       </div>
     `;
     return bar;
+  }
+
+  function renderEurRateSection(order) {
+    const section = document.createElement("section");
+    section.className = "section eur-rate-section";
+    section.innerHTML = `
+      <div class="eur-rate-row">
+        <label for="eur-rate-input">Wechselkurs: 1 USD =</label>
+        <input id="eur-rate-input" class="text-input eur-rate-input" inputmode="decimal" />
+        <span>EUR</span>
+      </div>
+    `;
+    const rateInput = section.querySelector(".eur-rate-input");
+    rateInput.value = order.eurRate;
+    rateInput.addEventListener("input", (e) => {
+      const v = e.target.value;
+      if (/^[0-9]*[.,]?[0-9]{0,4}$/.test(v)) {
+        order.eurRate = v;
+        persist();
+        // Nur die Beträge aktualisieren, damit der Fokus im Kursfeld bleibt
+        // (statt alles über render()/renderTotalsOnly neu aufzubauen).
+        refreshAllAmounts(order);
+      } else {
+        e.target.value = order.eurRate;
+      }
+    });
+    return section;
   }
 
   function renderDiscountEffects(order) {
@@ -1099,12 +1169,12 @@
       if (!block) return;
       const shippingHtml =
         shippingNum > 0
-          ? `<span class="person-shipping">+ ${currency(shippingShare)} Versand</span>`
+          ? `<span class="person-shipping">+ ${currencyBoth(shippingShare, order)} Versand</span>`
           : "";
       const amountHtml =
         entry.rawAmount > entry.amount
-          ? `<span class="num-val-old">${currency(entry.rawAmount)}</span><span class="person-amount">${currency(entry.amount)}</span>`
-          : `<span class="person-amount">${currency(entry.amount)}</span>`;
+          ? `<span class="num-val-old">${currency(entry.rawAmount)}</span><span class="person-amount">${currencyBoth(entry.amount, order)}</span>`
+          : `<span class="person-amount">${currencyBoth(entry.amount, order)}</span>`;
       block.innerHTML = `${amountHtml}${shippingHtml}`;
     });
 
@@ -1112,19 +1182,49 @@
     if (shippingNum > 0 && perPersonTotals.length > 0) {
       const text = `Wird gleichmäßig auf ${perPersonTotals.length} ${
         perPersonTotals.length === 1 ? "Person" : "Personen"
-      } aufgeteilt: ${currency(shippingShare)} pro Person.`;
+      } aufgeteilt: ${currencyBoth(shippingShare, order)} pro Person.`;
       if (hintExisting) {
-        hintExisting.textContent = text;
+        hintExisting.innerHTML = text;
       } else {
         const shippingSection = document.getElementById("shipping-row").parentElement;
         const hint = document.createElement("div");
         hint.className = "shipping-hint";
-        hint.textContent = text;
+        hint.innerHTML = text;
         shippingSection.appendChild(hint);
       }
     } else if (hintExisting) {
       hintExisting.remove();
     }
+  }
+
+  // Kürzt lange Produktnamen für die Anzeige in der Produktliste. Standardmäßig
+  // wird am Anfang der ersten Klammer abgeschnitten (z. B. Dosierungsangaben
+  // wie "(2 mg/vial, 10vial/kit)" fallen weg) - das ist meist der Punkt, ab
+  // dem der Name für die Liste nicht mehr nötig ist. Ist aber schon der Teil
+  // vor der Klammer für sich genommen sehr lang, wird schon früher gekürzt,
+  // damit die Zeile nicht zu breit wird. Ganz ohne Klammer greift dieselbe
+  // Maximallänge. Ein "..."-Knopf blendet danach den vollen Namen ein.
+  const NAME_TRUNCATE_MAX = 40;
+
+  function renderTruncatedName(name) {
+    const parenIdx = name.indexOf("(");
+    let cutAt = null;
+
+    if (parenIdx === -1) {
+      // Keine Klammer -> normale Maximallänge
+      if (name.length > NAME_TRUNCATE_MAX) cutAt = NAME_TRUNCATE_MAX;
+    } else if (parenIdx > NAME_TRUNCATE_MAX) {
+      // Teil vor der Klammer ist selbst schon zu lang -> früher kürzen
+      cutAt = NAME_TRUNCATE_MAX;
+    } else if (parenIdx > 0) {
+      // Normalfall: an der Klammer kürzen
+      cutAt = parenIdx;
+    }
+
+    if (cutAt == null) return esc(name);
+
+    const shortPart = name.slice(0, cutAt).trimEnd();
+    return `${esc(shortPart)}<button type="button" class="name-expand-btn" aria-label="Vollständigen Namen anzeigen">…</button>`;
   }
 
   function renderProductRow(order, product) {
@@ -1137,13 +1237,13 @@
 
     const priceHtml =
       factor < 1
-        ? `<span class="num-val-old">${currency(product.price)}</span><span class="num-val">${currency(discountedPrice)}</span>`
-        : `<span class="num-val">${currency(product.price)}</span>`;
+        ? `<span class="num-val-old">${currency(product.price)}</span><span class="num-val">${currencyBoth(discountedPrice, order)}</span>`
+        : `<span class="num-val">${currencyBoth(product.price, order)}</span>`;
 
     row.innerHTML = `
       <div class="product-top">
         <div class="product-main">
-          <div class="product-name">${product.qty}× ${esc(product.name)}</div>
+          <div class="product-name">${product.qty}× ${renderTruncatedName(product.name)}</div>
           <div class="product-people">${esc(product.participants.join(", "))}</div>
         </div>
         <div class="product-actions">
@@ -1159,15 +1259,25 @@
           </div>
           <div class="num-block num-block-total">
             <span class="num-label">Gesamt</span>
-            <span class="num-val num-val-total">${currency(total)}</span>
+            <span class="num-val num-val-total">${currencyBoth(total, order)}</span>
           </div>
           <div class="num-block">
             <span class="num-label">Pro Person</span>
-            <span class="num-val accent">${currency(perPerson)}</span>
+            <span class="num-val accent">${currencyBoth(perPerson, order)}</span>
           </div>
         </div>
       </div>
     `;
+
+    const nameEl = row.querySelector(".product-name");
+    const expandBtn = nameEl.querySelector(".name-expand-btn");
+    if (expandBtn) {
+      expandBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        nameEl.innerHTML = `${product.qty}× ${esc(product.name)}`;
+      });
+    }
+
 
     const [editBtn, delBtn] = row.querySelectorAll(".product-actions button");
     editBtn.addEventListener("click", () => {
@@ -1279,7 +1389,7 @@
           <span class="autocomplete-item-name">
             ${esc(item.name)}
           </span>
-          <span class="autocomplete-item-meta">${currency(item.price)}</span>
+          <span class="autocomplete-item-meta">${currencyBoth(item.price, order)}</span>
         `;
         row.addEventListener("mousedown", (e) => {
           // mousedown statt click, damit es vor dem blur des Inputs feuert
@@ -1522,9 +1632,9 @@
 
     function updateCountAndPreview() {
       const info = priceInfo();
-      const totalText = info.total !== null ? currency(info.total) : "—";
-      const perPersonText = info.perPerson !== null ? currency(info.perPerson) : "—";
-      preview.querySelector("strong").textContent = `${totalText} / ${perPersonText}`;
+      const totalText = info.total !== null ? currencyBoth(info.total, order) : "—";
+      const perPersonText = info.perPerson !== null ? currencyBoth(info.perPerson, order) : "—";
+      preview.querySelector("strong").innerHTML = `${totalText} / ${perPersonText}`;
     }
     updateCountAndPreview();
 
