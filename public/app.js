@@ -68,6 +68,20 @@
     return d.innerHTML;
   }
 
+  // Prüft, ob zwei Produkteinträge als "dasselbe Produkt für dieselbe Gruppe"
+  // gelten: gleicher Produktname (Groß-/Kleinschreibung und Leerzeichen am
+  // Rand egal) UND exakt dieselbe Menge an beteiligten Personen (Reihenfolge
+  // egal). Nur dann wird beim Hinzufügen zusammengeführt statt ein neuer
+  // Eintrag erzeugt.
+  function isSameProductAndPeople(a, b) {
+    const normName = (s) => s.trim().toLowerCase();
+    if (normName(a.name) !== normName(b.name)) return false;
+    if (a.participants.length !== b.participants.length) return false;
+    const setA = new Set(a.participants);
+    if (b.participants.some((p) => !setA.has(p))) return false;
+    return true;
+  }
+
   function makeOrder(title) {
     return { id: uid(), title, products: [], shipping: "", discount: "", priceList: [], priceListName: "", eurRate: "0.865" };
   }
@@ -724,6 +738,9 @@
     productsHead.className = "section-head";
     productsHead.innerHTML = `<h2 class="products-title">Produkte</h2>`;
     const hasProducts = order.products.length > 0;
+    const isAddingNew = formOpen && editingProductId === null;
+    const isEditingExisting = formOpen && editingProductId !== null;
+
     if (!formOpen && hasProducts) {
       // Schon Produkte da -> kompakter Button oben rechts, damit die Liste im
       // Vordergrund bleibt.
@@ -740,9 +757,8 @@
     }
     productsSection.appendChild(productsHead);
 
-    if (formOpen) {
-      const editingProduct = order.products.find((p) => p.id === editingProductId) || null;
-      productsSection.appendChild(renderProductForm(order, editingProduct));
+    if (isAddingNew) {
+      productsSection.appendChild(renderProductForm(order, null));
     }
 
     if (!hasProducts && !formOpen) {
@@ -766,7 +782,15 @@
     } else if (hasProducts) {
       const list = document.createElement("div");
       list.className = "product-list";
-      order.products.forEach((p) => list.appendChild(renderProductRow(order, p)));
+      order.products.forEach((p) => {
+        if (isEditingExisting && p.id === editingProductId) {
+          // Wird gerade bearbeitet -> Formular direkt an dieser Stelle in
+          // der Liste anzeigen, statt oben in der Sektion.
+          list.appendChild(renderProductForm(order, p));
+        } else {
+          list.appendChild(renderProductRow(order, p));
+        }
+      });
       productsSection.appendChild(list);
     }
 
@@ -1306,7 +1330,7 @@
     autocompleteActiveIndex = -1;
 
     const card = document.createElement("div");
-    card.className = "form-card";
+    card.className = initial ? "form-card form-card-inline" : "form-card";
 
     let name = initial?.name ?? "";
     let participants = initial?.participants ? initial.participants.slice() : [];
@@ -1683,9 +1707,23 @@
 
       const exists = order.products.some((p) => p.id === product.id);
       if (exists) {
+        // Bestehendes Produkt wird bearbeitet -> direkt ersetzen, keine
+        // Zusammenführung mit anderen Zeilen.
         order.products = order.products.map((p) => (p.id === product.id ? product : p));
       } else {
-        order.products.push(product);
+        // Neues Produkt: mit einem bestehenden Eintrag zusammenführen, wenn
+        // Produktname und die Menge der beteiligten Personen exakt
+        // übereinstimmen (Reihenfolge egal). Andernfalls neuer Eintrag.
+        const duplicate = order.products.find((p) => isSameProductAndPeople(p, product));
+        if (duplicate) {
+          order.products = order.products.map((p) =>
+            p.id === duplicate.id
+              ? { ...p, qty: p.qty + product.qty, price: product.price }
+              : p
+          );
+        } else {
+          order.products.push(product);
+        }
       }
 
       formOpen = false;
