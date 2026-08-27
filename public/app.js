@@ -21,6 +21,7 @@
     check: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
     bag: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>',
     users: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-3px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    chevron: '<svg class="chevron-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
   };
 
   function uid() {
@@ -219,6 +220,7 @@
   // UI-only (not persisted meaningfully across reload need, but fine to keep)
   let formOpen = false;
   let editingProductId = null;
+  let expandedPersonName = null;
   let personPickerAdding = false;
   let peopleManagerOpen = false;
   let newPersonInputValue = "";
@@ -817,9 +819,18 @@
 
       const list = document.createElement("div");
       list.className = "person-list";
-      perPersonTotals.forEach(({ name, amount, rawAmount }) => {
+      perPersonTotals.forEach((entry) => {
+        const { name, amount, rawAmount } = entry;
+        const isExpanded = expandedPersonName === name;
+
+        // Ein <div role="button"> statt eines echten <button> - manche
+        // WebKit-Versionen wenden display:flex auf <button> nicht zuverlässig
+        // an (der interne anonyme Button-Container ignoriert es), ein <div>
+        // mit Tastatur-Handling verhält sich hier vorhersehbarer.
         const line = document.createElement("div");
-        line.className = "person-line";
+        line.setAttribute("role", "button");
+        line.setAttribute("tabindex", "0");
+        line.className = "person-line" + (isExpanded ? " expanded" : "");
         const shippingHtml =
           shippingNum > 0
             ? `<span class="person-shipping">+ ${currencyBoth(shippingShare, order)} Versand</span>`
@@ -829,13 +840,31 @@
             ? `<span class="num-val-old">${currency(rawAmount)}</span><span class="person-amount">${currencyBoth(amount, order)}</span>`
             : `<span class="person-amount">${currencyBoth(amount, order)}</span>`;
         line.innerHTML = `
-          <span class="person-name">${esc(name)}</span>
+          <span class="person-name">${ICONS.chevron}${esc(name)}</span>
           <div class="person-amount-block">
             ${amountHtml}
             ${shippingHtml}
           </div>
         `;
+        const toggle = () => {
+          expandedPersonName = isExpanded ? null : name;
+          render();
+        };
+        line.addEventListener("click", toggle);
+        line.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggle();
+          }
+        });
         list.appendChild(line);
+
+        if (isExpanded) {
+          const detail = document.createElement("div");
+          detail.className = "person-detail";
+          detail.innerHTML = buildPersonDetailHtml(entry, shippingNum, shippingShare, order);
+          list.appendChild(detail);
+        }
       });
       peopleSection.appendChild(list);
       frag.appendChild(peopleSection);
@@ -1050,23 +1079,77 @@
     return discountNum > 0 ? 1 - Math.min(discountNum, 100) / 100 : 1;
   }
 
+  // Baut den HTML-Inhalt des ausklappbaren Detailbereichs einer Person
+  // (Produktliste + Zusammensetzung). Wird sowohl beim ersten Aufbau als
+  // auch beim Live-Update (Rabatt/Versand-Änderung) verwendet, damit beide
+  // Stellen exakt dieselbe Struktur erzeugen.
+  function buildPersonDetailHtml(entry, shippingNum, shippingShare, order) {
+    const { amount, items } = entry;
+    const itemsHtml = items
+      .map((it) => {
+        const qtyLabel =
+          it.participantCount > 1 && Number.isInteger(it.qtyShare)
+            ? `${it.qtyShare}×`
+            : it.participantCount > 1
+              ? `${it.qty}× ÷${it.participantCount}`
+              : `${it.qty}×`;
+        return `
+          <div class="person-detail-row">
+            <span class="person-detail-name">${qtyLabel} ${esc(it.name)}</span>
+            <span class="person-detail-amount">${currencyBoth(it.share, order)}</span>
+          </div>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="person-detail-items">${itemsHtml}</div>
+      <div class="person-detail-row person-detail-subtotal">
+        <span>Zwischensumme Produkte</span>
+        <span>${currencyBoth(amount, order)}</span>
+      </div>
+      ${
+        shippingNum > 0
+          ? `<div class="person-detail-row person-detail-shipping"><span>Versandanteil</span><span>${currencyBoth(shippingShare, order)}</span></div>`
+          : ""
+      }
+      <div class="person-detail-row person-detail-total">
+        <span>Gesamt</span>
+        <span>${currencyBoth(amount + shippingShare, order)}</span>
+      </div>
+    `;
+  }
+
   function computePerPersonTotals(order) {
     const factor = getDiscountFactor(order);
     const map = {};
     const rawMap = {};
+    const itemsMap = {};
     for (const p of order.products) {
       const discountedPrice = p.price * factor;
       const total = discountedPrice * p.qty;
       const rawTotal = p.price * p.qty;
       const share = total / p.participants.length;
       const rawShare = rawTotal / p.participants.length;
+      // Wie viele der Stückzahl entfallen anteilig auf eine Person (z. B.
+      // 3 Stück auf 2 Personen -> 1.5 pro Person). Wird in den Details nur
+      // angezeigt, wenn es sich glatt aufteilen lässt.
+      const qtyShare = p.qty / p.participants.length;
       for (const person of p.participants) {
         map[person] = (map[person] || 0) + share;
         rawMap[person] = (rawMap[person] || 0) + rawShare;
+        if (!itemsMap[person]) itemsMap[person] = [];
+        itemsMap[person].push({
+          name: p.name,
+          qty: p.qty,
+          participantCount: p.participants.length,
+          qtyShare,
+          share,
+        });
       }
     }
     return Object.entries(map)
-      .map(([name, amount]) => ({ name, amount, rawAmount: rawMap[name] }))
+      .map(([name, amount]) => ({ name, amount, rawAmount: rawMap[name], items: itemsMap[name] || [] }))
       .sort((a, b) => b.amount - a.amount);
   }
 
@@ -1077,6 +1160,7 @@
     const shippingNum = parseFloat(String(order.shipping).replace(",", ".")) || 0;
     const total = subtotal + shippingNum;
     const discountedTotal = discountedSubtotal + shippingNum;
+    const totalItemCount = order.products.reduce((sum, p) => sum + p.qty, 0);
 
     const subtotalHtml =
       factor < 1
@@ -1091,6 +1175,10 @@
     bar.className = "total-bar";
     bar.id = "total-bar";
     bar.innerHTML = `
+      <div class="total-line item-count-line">
+        <span>Produkte insgesamt</span>
+        <strong>${totalItemCount}×</strong>
+      </div>
       <div class="total-line">
         <span>Gesamt ohne Versand</span>
         <strong>${subtotalHtml}</strong>
@@ -1200,6 +1288,15 @@
           ? `<span class="num-val-old">${currency(entry.rawAmount)}</span><span class="person-amount">${currencyBoth(entry.amount, order)}</span>`
           : `<span class="person-amount">${currencyBoth(entry.amount, order)}</span>`;
       block.innerHTML = `${amountHtml}${shippingHtml}`;
+
+      // Falls diese Person gerade ausgeklappt ist, den kompletten
+      // Detailbereich mit derselben Funktion wie beim ersten Aufbau neu
+      // erzeugen (robust gegenüber erscheinenden/verschwindenden Zeilen,
+      // z. B. wenn der Versand von 0 auf einen Wert geändert wird).
+      const detail = line.nextElementSibling;
+      if (detail && detail.classList.contains("person-detail")) {
+        detail.innerHTML = buildPersonDetailHtml(entry, shippingNum, shippingShare, order);
+      }
     });
 
     const hintExisting = document.querySelector(".shipping-hint");
