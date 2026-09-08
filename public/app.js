@@ -6,6 +6,26 @@
     "Samy", "Iyad", "Adriana", "Tolga", "Miran",
   ];
 
+  // Für die Länderauswahl bei Adressen. Deutschsprachige Länder zuerst
+  // (häufigster Fall), Rest alphabetisch auf Deutsch.
+  const COUNTRIES = [
+    "Deutschland", "Österreich", "Schweiz",
+    "Ägypten", "Albanien", "Algerien", "Andorra", "Argentinien", "Armenien",
+    "Aserbaidschan", "Australien", "Belgien", "Bosnien und Herzegowina",
+    "Brasilien", "Bulgarien", "Chile", "China", "Costa Rica", "Dänemark",
+    "Estland", "Finnland", "Frankreich", "Georgien", "Griechenland",
+    "Großbritannien", "Indien", "Indonesien", "Irland", "Island", "Israel",
+    "Italien", "Japan", "Kanada", "Kasachstan", "Kolumbien", "Kroatien",
+    "Lettland", "Liechtenstein", "Litauen", "Luxemburg", "Malta", "Marokko",
+    "Mexiko", "Moldau", "Monaco", "Montenegro", "Neuseeland", "Niederlande",
+    "Nordmazedonien", "Norwegen", "Peru", "Philippinen", "Polen", "Portugal",
+    "Rumänien", "Russland", "Saudi-Arabien", "Schweden", "Serbien",
+    "Singapur", "Slowakei", "Slowenien", "Spanien", "Südafrika", "Südkorea",
+    "Thailand", "Tschechien", "Türkei", "Tunesien", "Ukraine", "Ungarn",
+    "Vereinigte Arabische Emirate", "Vereinigte Staaten", "Vietnam",
+    "Zypern", "Sonstiges",
+  ];
+
   const STORAGE_KEY = "sammelbestellung-state-v1"; // Fallback nur falls Server nicht erreichbar
   const API_URL = "/api/state";
   const POLL_INTERVAL_MS = 3000;
@@ -22,6 +42,7 @@
     bag: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>',
     users: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-3px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
     chevron: '<svg class="chevron-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
+    mapPin: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>',
   };
 
   function uid() {
@@ -89,7 +110,7 @@
 
   function defaultState() {
     const order = makeOrder("Sammelbestellung 1");
-    return { people: DEFAULT_PEOPLE.slice(), orders: [order], activeId: order.id };
+    return { people: DEFAULT_PEOPLE.slice(), orders: [order], activeId: order.id, addresses: {} };
   }
 
   function loadLocalFallback() {
@@ -224,6 +245,7 @@
   let personPickerAdding = false;
   let peopleManagerOpen = false;
   let newPersonInputValue = "";
+  let editingAddressFor = null;
   let priceListError = "";
   let autocompleteOpen = false;
   let autocompleteActiveIndex = -1;
@@ -353,6 +375,22 @@
         product.participants = product.participants.filter((p) => p !== name);
       });
     });
+    // ...und ihre hinterlegte Adresse ebenfalls entfernen.
+    if (state.addresses) delete state.addresses[name];
+  }
+
+  function getAddress(name) {
+    return (state.addresses && state.addresses[name]) || null;
+  }
+
+  function setAddress(name, data) {
+    if (!state.addresses) state.addresses = {};
+    state.addresses[name] = data;
+  }
+
+  function hasAddress(name) {
+    const a = getAddress(name);
+    return !!(a && (a.fullName || a.street || a.zip || a.city || a.country));
   }
 
   // ---------- Bestätigungs-Dialog ----------
@@ -406,6 +444,7 @@
   const root = document.getElementById("app");
 
   function render() {
+    if (state.addresses == null) state.addresses = {};
     const order = getActiveOrder();
     root.innerHTML = "";
     root.appendChild(renderHeader());
@@ -552,6 +591,134 @@
     return wrap;
   }
 
+  function renderAddressForm(name) {
+    const existing = getAddress(name) || {};
+    const wrap = document.createElement("div");
+    wrap.className = "form-card form-card-inline address-form";
+
+    let fullName = existing.fullName ?? name;
+    let street = existing.street ?? "";
+    let zip = existing.zip ?? "";
+    let city = existing.city ?? "";
+    let country = existing.country ?? "Deutschland";
+
+    const nameField = document.createElement("div");
+    nameField.className = "field";
+    nameField.innerHTML = `<label class="label">Name (für den Versand)</label>`;
+    const nameInput = document.createElement("input");
+    nameInput.className = "text-input";
+    nameInput.value = fullName;
+    nameInput.addEventListener("input", (e) => (fullName = e.target.value));
+    nameField.appendChild(nameInput);
+    wrap.appendChild(nameField);
+
+    const streetField = document.createElement("div");
+    streetField.className = "field";
+    streetField.innerHTML = `<label class="label">Straße und Hausnummer</label>`;
+    const streetInput = document.createElement("input");
+    streetInput.className = "text-input";
+    streetInput.value = street;
+    streetInput.addEventListener("input", (e) => (street = e.target.value));
+    streetField.appendChild(streetInput);
+    wrap.appendChild(streetField);
+
+    const rowField = document.createElement("div");
+    rowField.className = "row-2";
+
+    const zipField = document.createElement("div");
+    zipField.className = "field";
+    zipField.innerHTML = `<label class="label">PLZ</label>`;
+    const zipInput = document.createElement("input");
+    zipInput.className = "text-input";
+    zipInput.value = zip;
+    zipInput.addEventListener("input", (e) => (zip = e.target.value));
+    zipField.appendChild(zipInput);
+    rowField.appendChild(zipField);
+
+    const cityField = document.createElement("div");
+    cityField.className = "field";
+    cityField.innerHTML = `<label class="label">Stadt</label>`;
+    const cityInput = document.createElement("input");
+    cityInput.className = "text-input";
+    cityInput.value = city;
+    cityInput.addEventListener("input", (e) => (city = e.target.value));
+    cityField.appendChild(cityInput);
+    rowField.appendChild(cityField);
+
+    wrap.appendChild(rowField);
+
+    const countryField = document.createElement("div");
+    countryField.className = "field";
+    countryField.innerHTML = `<label class="label">Land</label>`;
+    const countrySelect = document.createElement("select");
+    countrySelect.className = "select";
+    COUNTRIES.forEach((c) => {
+      const opt = document.createElement("option");
+      opt.value = c;
+      opt.textContent = c;
+      if (c === country) opt.selected = true;
+      countrySelect.appendChild(opt);
+    });
+    countrySelect.addEventListener("change", (e) => (country = e.target.value));
+    countryField.appendChild(countrySelect);
+    wrap.appendChild(countryField);
+
+    const actions = document.createElement("div");
+    actions.className = "form-actions";
+
+    if (hasAddress(name)) {
+      const clearBtn = document.createElement("button");
+      clearBtn.type = "button";
+      clearBtn.className = "btn secondary form-btn";
+      clearBtn.textContent = "Adresse löschen";
+      clearBtn.addEventListener("click", () => {
+        showConfirmDialog({
+          title: "Adresse löschen?",
+          message: `Die hinterlegte Adresse von "${name}" wird gelöscht.`,
+          confirmLabel: "Löschen",
+          onConfirm: () => {
+            if (state.addresses) delete state.addresses[name];
+            editingAddressFor = null;
+            render();
+            persist();
+          },
+        });
+      });
+      actions.appendChild(clearBtn);
+    } else {
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn secondary form-btn";
+      cancelBtn.textContent = "Abbrechen";
+      cancelBtn.addEventListener("click", () => {
+        editingAddressFor = null;
+        render();
+      });
+      actions.appendChild(cancelBtn);
+    }
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn primary form-btn";
+    saveBtn.textContent = "Adresse speichern";
+    saveBtn.addEventListener("click", () => {
+      setAddress(name, {
+        fullName: fullName.trim(),
+        street: street.trim(),
+        zip: zip.trim(),
+        city: city.trim(),
+        country,
+      });
+      editingAddressFor = null;
+      render();
+      persist();
+    });
+    actions.appendChild(saveBtn);
+
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
   function renderPeopleManagerSection() {
     const section = document.createElement("section");
     section.className = "section";
@@ -582,33 +749,68 @@
       hint.textContent = "Beim Entfernen wird die Person auch aus allen Produkten in allen Sammelbestellungen ausgetragen.";
       card.appendChild(hint);
 
-      const chipsRow = document.createElement("div");
-      chipsRow.className = "chips-row";
+      const peopleRows = document.createElement("div");
+      peopleRows.className = "people-rows";
       state.people.forEach((p) => {
-        const chip = document.createElement("span");
-        chip.className = "chip";
-        chip.textContent = p + " ";
+        const isEditingAddress = editingAddressFor === p;
+
+        const row = document.createElement("div");
+        row.className = "person-row";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "person-row-name";
+        nameSpan.textContent = p;
+        if (hasAddress(p)) {
+          const badge = document.createElement("span");
+          badge.className = "address-badge";
+          badge.title = "Adresse hinterlegt";
+          badge.innerHTML = ICONS.mapPin;
+          nameSpan.appendChild(badge);
+        }
+        row.appendChild(nameSpan);
+
+        const actions = document.createElement("div");
+        actions.className = "person-row-actions";
+
+        const addrBtn = document.createElement("button");
+        addrBtn.type = "button";
+        addrBtn.className = "icon-btn-ghost" + (isEditingAddress ? " active" : "");
+        addrBtn.setAttribute("aria-label", `Adresse von ${p} bearbeiten`);
+        addrBtn.innerHTML = ICONS.mapPin;
+        addrBtn.addEventListener("click", () => {
+          editingAddressFor = isEditingAddress ? null : p;
+          render();
+        });
+        actions.appendChild(addrBtn);
+
         const rm = document.createElement("button");
         rm.type = "button";
-        rm.className = "chip-remove";
+        rm.className = "icon-btn-ghost danger";
         rm.setAttribute("aria-label", `${p} entfernen`);
-        rm.innerHTML = ICONS.x;
+        rm.innerHTML = ICONS.xTiny;
         rm.addEventListener("click", () => {
           showConfirmDialog({
             title: "Person entfernen?",
-            message: `"${p}" wird aus der Personenliste entfernt und aus allen Produkten in allen Sammelbestellungen ausgetragen. Das kann nicht rückgängig gemacht werden.`,
+            message: `"${p}" wird aus der Personenliste entfernt und aus allen Produkten in allen Sammelbestellungen ausgetragen. Eine hinterlegte Adresse wird ebenfalls gelöscht. Das kann nicht rückgängig gemacht werden.`,
             confirmLabel: "Entfernen",
             onConfirm: () => {
+              if (editingAddressFor === p) editingAddressFor = null;
               removePerson(p);
               render();
               persist();
             },
           });
         });
-        chip.appendChild(rm);
-        chipsRow.appendChild(chip);
+        actions.appendChild(rm);
+
+        row.appendChild(actions);
+        peopleRows.appendChild(row);
+
+        if (isEditingAddress) {
+          peopleRows.appendChild(renderAddressForm(p));
+        }
       });
-      card.appendChild(chipsRow);
+      card.appendChild(peopleRows);
 
       const addRow = document.createElement("div");
       addRow.className = "add-row";
@@ -1084,7 +1286,7 @@
   // auch beim Live-Update (Rabatt/Versand-Änderung) verwendet, damit beide
   // Stellen exakt dieselbe Struktur erzeugen.
   function buildPersonDetailHtml(entry, shippingNum, shippingShare, order) {
-    const { amount, items } = entry;
+    const { name, amount, items } = entry;
     const itemsHtml = items
       .map((it) => {
         const qtyLabel =
@@ -1102,6 +1304,23 @@
       })
       .join("");
 
+    const address = getAddress(name);
+    const addressHtml =
+      address && hasAddress(name)
+        ? `
+          <div class="person-detail-address">
+            ${ICONS.mapPin}
+            <span>
+              ${address.fullName ? `${esc(address.fullName)}<br>` : ""}
+              ${[address.street, [address.zip, address.city].filter(Boolean).join(" "), address.country]
+                .filter(Boolean)
+                .map(esc)
+                .join(", ")}
+            </span>
+          </div>
+        `
+        : "";
+
     return `
       <div class="person-detail-items">${itemsHtml}</div>
       <div class="person-detail-row person-detail-subtotal">
@@ -1117,6 +1336,7 @@
         <span>Gesamt</span>
         <span>${currencyBoth(amount + shippingShare, order)}</span>
       </div>
+      ${addressHtml}
     `;
   }
 

@@ -271,6 +271,7 @@
     cursor: pointer;
   }
   .icon-btn-ghost:hover { background: #2A2723; color: #D8D3C6; }
+  .icon-btn-ghost.active { background: #3A2E1F; color: #C98A54; }
   .icon-btn-ghost.danger {
     border: 1px solid #E0705E;
     color: #E0705E;
@@ -335,6 +336,18 @@
     font-size: 13.5px;
     padding-top: 4px;
   }
+  .person-detail-address {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #332F29;
+    font-size: 12px;
+    color: #A39D8E;
+    line-height: 1.5;
+  }
+  .person-detail-address svg { flex-shrink: 0; margin-top: 2px; color: #7A756A; }
 
   .form-card {
     background: #242220;
@@ -351,10 +364,12 @@
     border-bottom: 1px solid #332F29;
     background: #2A2620;
     box-shadow: inset 3px 0 0 #C98A54;
+    padding: 16px;
   }
   .form-card-inline:last-child { border-bottom: none; }
-  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .row-2 { display: flex; gap: 12px; }
+  .row-2 .field { flex: 1; min-width: 0; }
   .label {
     font-size: 12.5px;
     font-weight: 600;
@@ -370,6 +385,9 @@
     font-family: inherit;
     color: #EDE9E0;
     background: #242220;
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
   }
   .text-input:focus-visible, .select:focus-visible {
     outline: 2px solid #C98A54;
@@ -432,6 +450,38 @@
     padding: 0;
   }
   .chip-remove:hover { background: #3E3A32; color: #3D3B36; }
+
+  /* ---- Personen-Liste mit Adress-Aktionen (im "Personen verwalten"-Bereich) ---- */
+  .people-rows {
+    display: flex;
+    flex-direction: column;
+    background: #201E1B;
+    border: 1px solid #332F29;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+  .person-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 10px 9px 14px;
+    border-bottom: 1px solid #2C2925;
+  }
+  .person-row:last-child { border-bottom: none; }
+  .person-row-name {
+    font-size: 13.5px;
+    font-weight: 500;
+    color: #EDE9E0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .person-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .address-badge { color: #C98A54; display: inline-flex; }
+  .address-form { border-radius: 0; border: none; border-bottom: 1px solid #2C2925; background: #262320; }
+  .people-rows .person-row:has(+ .address-form) { border-bottom: none; }
 
   .select {
     width: 100%;
