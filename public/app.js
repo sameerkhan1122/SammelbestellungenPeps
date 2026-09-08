@@ -598,6 +598,7 @@
 
     let fullName = existing.fullName ?? name;
     let street = existing.street ?? "";
+    let addressLine2 = existing.addressLine2 ?? "";
     let zip = existing.zip ?? "";
     let city = existing.city ?? "";
     let country = existing.country ?? "Deutschland";
@@ -621,6 +622,17 @@
     streetInput.addEventListener("input", (e) => (street = e.target.value));
     streetField.appendChild(streetInput);
     wrap.appendChild(streetField);
+
+    const line2Field = document.createElement("div");
+    line2Field.className = "field";
+    line2Field.innerHTML = `<label class="label">Adresszusatz (optional)</label>`;
+    const line2Input = document.createElement("input");
+    line2Input.className = "text-input";
+    line2Input.placeholder = "z. B. c/o, Etage, Wohnungsnummer…";
+    line2Input.value = addressLine2;
+    line2Input.addEventListener("input", (e) => (addressLine2 = e.target.value));
+    line2Field.appendChild(line2Input);
+    wrap.appendChild(line2Field);
 
     const rowField = document.createElement("div");
     rowField.className = "row-2";
@@ -705,6 +717,7 @@
       setAddress(name, {
         fullName: fullName.trim(),
         street: street.trim(),
+        addressLine2: addressLine2.trim(),
         zip: zip.trim(),
         city: city.trim(),
         country,
@@ -1305,18 +1318,31 @@
       .join("");
 
     const address = getAddress(name);
+    const addressRows = address
+      ? [
+          ["Name", address.fullName],
+          ["Straße und Hausnummer", address.street],
+          ["Adresszusatz", address.addressLine2],
+          ["PLZ", address.zip],
+          ["Stadt", address.city],
+          ["Land", address.country],
+        ].filter(([, value]) => value)
+      : [];
     const addressHtml =
-      address && hasAddress(name)
+      addressRows.length > 0
         ? `
           <div class="person-detail-address">
-            ${ICONS.mapPin}
-            <span>
-              ${address.fullName ? `${esc(address.fullName)}<br>` : ""}
-              ${[address.street, [address.zip, address.city].filter(Boolean).join(" "), address.country]
-                .filter(Boolean)
-                .map(esc)
-                .join(", ")}
-            </span>
+            <div class="person-detail-address-head">${ICONS.mapPin}<span>Adresse</span></div>
+            ${addressRows
+              .map(
+                ([label, value]) => `
+                  <div class="address-detail-row">
+                    <span class="address-detail-label">${esc(label)}:</span>
+                    <span class="address-detail-value">${esc(value)}</span>
+                  </div>
+                `
+              )
+              .join("")}
           </div>
         `
         : "";

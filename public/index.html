@@ -337,17 +337,33 @@
     padding-top: 4px;
   }
   .person-detail-address {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
     margin-top: 10px;
     padding-top: 10px;
     border-top: 1px solid #332F29;
     font-size: 12px;
     color: #A39D8E;
-    line-height: 1.5;
   }
-  .person-detail-address svg { flex-shrink: 0; margin-top: 2px; color: #7A756A; }
+  .person-detail-address-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: #B5AF9F;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+  .person-detail-address-head svg { flex-shrink: 0; color: #7A756A; }
+  .address-detail-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    padding: 2px 0;
+    line-height: 1.4;
+  }
+  .address-detail-label { color: #7A756A; flex-shrink: 0; min-width: 130px; }
+  .address-detail-value { color: #C7C1B2; }
 
   .form-card {
     background: #242220;
